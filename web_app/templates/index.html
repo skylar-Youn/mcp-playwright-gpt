@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 쇼츠 제작기</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>AI 쇼츠 제작기</h1>
+    <form method="post" action="/generate">
+        <div class="field">
+            <label for="topic">주제</label>
+            <input type="text" id="topic" name="topic" value="{{ form_values.topic }}" required>
+        </div>
+        <div class="field">
+            <label for="style">스타일</label>
+            <input type="text" id="style" name="style" value="{{ form_values.style }}">
+        </div>
+        <div class="field inline">
+            <label for="duration">길이 (초)</label>
+            <input type="number" id="duration" name="duration" min="10" max="120" value="{{ form_values.duration }}">
+            <label for="lang">언어</label>
+            <input type="text" id="lang" name="lang" value="{{ form_values.lang }}">
+            <label for="fps">FPS</label>
+            <input type="number" id="fps" name="fps" min="12" max="60" value="{{ form_values.fps }}">
+        </div>
+        <div class="field inline">
+            <label for="voice">TTS 음성</label>
+            <input type="text" id="voice" name="voice" value="{{ form_values.voice }}">
+            <label for="output_name">파일명 (선택)</label>
+            <input type="text" id="output_name" name="output_name" value="{{ form_values.output_name }}" placeholder="자동 생성">
+        </div>
+        <div class="field inline">
+            <label>
+                <input type="checkbox" name="music" {% if form_values.music %}checked{% endif %}>
+                배경음 사용
+            </label>
+            <label>
+                BGM 볼륨
+                <input type="number" step="0.01" min="0" max="1" name="music_volume" value="{{ form_values.music_volume }}">
+            </label>
+            <label>
+                덕킹 비율
+                <input type="number" step="0.05" min="0" max="1" name="ducking" value="{{ form_values.ducking }}">
+            </label>
+        </div>
+        <div class="field inline">
+            <label><input type="checkbox" name="burn_subs" {% if form_values.burn_subs %}checked{% endif %}> 자막 번인</label>
+            <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런 (영상 미생성)</label>
+            <label><input type="checkbox" name="save_json" {% if form_values.save_json %}checked{% endif %}> 메타데이터 JSON 저장</label>
+        </div>
+        <details class="advanced">
+            <summary>고급 설정</summary>
+            <div class="field inline">
+                <label for="script_model">스크립트 모델</label>
+                <input type="text" id="script_model" name="script_model" value="{{ form_values.script_model }}">
+                <label for="tts_model">TTS 모델</label>
+                <input type="text" id="tts_model" name="tts_model" value="{{ form_values.tts_model }}">
+            </div>
+        </details>
+        <button type="submit">생성하기</button>
+    </form>
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if result %}
+    <div class="result">
+        <h2>생성 완료</h2>
+        <div class="links">
+            {% if result.video_url %}<a href="{{ result.video_url }}" target="_blank">영상 다운로드</a>{% endif %}
+            {% if result.audio_url %}<a href="{{ result.audio_url }}" target="_blank">음성</a>{% endif %}
+            {% if result.srt_url %}<a href="{{ result.srt_url }}" target="_blank">자막</a>{% endif %}
+            {% if result.json_url %}<a href="{{ result.json_url }}" target="_blank">메타데이터</a>{% endif %}
+        </div>
+        <pre>{{ result.metadata | tojson(indent=2, ensure_ascii=False) }}</pre>
+    </div>
+    {% endif %}
+
+    {% if existing_outputs %}
+    <div class="existing">
+        <h2>기존 결과 불러오기</h2>
+        <form method="get" action="/" class="existing-form">
+            <label for="existing">파일 선택</label>
+            <select id="existing" name="existing">
+                {% for item in existing_outputs %}
+                <option value="{{ item.name }}" {% if result and result.metadata and result.metadata.get('base_name') == item.name %}selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">불러오기</button>
+        </form>
+        <ul class="existing-list">
+            {% for item in existing_outputs %}
+            <li>
+                <span>{{ item.label }}</span>
+                {% if item.video_url %}<a href="{{ item.video_url }}" target="_blank">영상</a>{% endif %}
+                {% if item.audio_url %}<a href="{{ item.audio_url }}" target="_blank">음성</a>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+</body>
+</html>

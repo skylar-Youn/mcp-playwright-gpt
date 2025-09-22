@@ -1,0 +1,139 @@
+:root {
+    color-scheme: dark light;
+    font-family: 'Segoe UI', sans-serif;
+}
+body {
+    margin: 0;
+    padding: 0;
+    background: #101820;
+    color: #f0f4f8;
+    display: flex;
+    justify-content: center;
+}
+.container {
+    width: min(960px, 90vw);
+    margin: 40px auto;
+    padding: 32px;
+    background: rgba(20, 30, 45, 0.9);
+    border-radius: 18px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+h1 {
+    margin-top: 0;
+    letter-spacing: 0.02em;
+}
+form {
+    display: grid;
+    gap: 16px;
+}
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.field.inline {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.field.inline label {
+    margin-right: 12px;
+}
+input[type="text"],
+input[type="number"],
+button {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+}
+input[type="text"],
+input[type="number"] {
+    background: rgba(255, 255, 255, 0.12);
+    color: inherit;
+}
+button {
+    background: linear-gradient(120deg, #5b7fff, #4bd4ff);
+    color: #04142e;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+}
+button:hover {
+    transform: translateY(-1px);
+}
+summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+.advanced {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 12px;
+}
+.alert {
+    margin-top: 24px;
+    padding: 16px;
+    border-radius: 10px;
+}
+.alert.error {
+    background: rgba(255, 89, 89, 0.2);
+    color: #ffb4b4;
+}
+.result {
+    margin-top: 32px;
+}
+.result pre {
+    background: rgba(0, 0, 0, 0.35);
+    padding: 16px;
+    border-radius: 12px;
+    overflow-x: auto;
+}
+.links {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.links a {
+    color: #4bd4ff;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.existing {
+    margin-bottom: 28px;
+    padding: 18px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.existing-form {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.existing-form select {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(0, 0, 0, 0.25);
+    color: inherit;
+}
+
+.existing-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.existing-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
