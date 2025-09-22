@@ -1,0 +1,8 @@
+node_modules/*
+.env
+.env.example
+.venv/*
+ai_shorts_maker/__pycache__
+web_app/__pycache__
+ai_shorts_maker/outputs/*
+ai_shorts_maker/assets
