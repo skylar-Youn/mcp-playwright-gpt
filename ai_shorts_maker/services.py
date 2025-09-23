@@ -253,10 +253,10 @@ def _auto_motion_parameters(
 
     mode = (mode or "kenburns").lower()
     strength = max(0.0, min(strength, 0.5))
-    shift_ratio = shift_ratio if shift_ratio is not None else strength * 0.6
-    shift_ratio = max(0.0, min(shift_ratio, 0.35))
+    shift_ratio = shift_ratio if shift_ratio is not None else strength * 0.65
+    shift_ratio = max(0.0, min(shift_ratio, 0.3))
     base_scale = max(base_scale, 1.0)
-    base_scale = max(base_scale, 1.0 + shift_ratio * 1.1)
+    base_scale = max(base_scale, 1.0 + shift_ratio * 1.25)
 
     offset_x = width * shift_ratio * 0.5
     offset_y = height * shift_ratio * 0.5
@@ -373,8 +373,8 @@ def _segment_to_clip(
     is_image_segment = segment.media_type in {"image", "image_overlay"}
     auto_motion_enabled = extras.get("auto_motion", True)
     auto_mode = str(extras.get("auto_motion_mode", "kenburns") or "kenburns")
-    auto_strength = extras.get("auto_motion_strength", 0.08)
-    auto_base_scale = extras.get("auto_motion_base_scale", 1.08)
+    auto_strength = extras.get("auto_motion_strength", 0.12)
+    auto_base_scale = extras.get("auto_motion_base_scale", 1.1)
     auto_shift = extras.get("auto_motion_shift", None)
 
     def _as_float(value, default=None):
@@ -399,8 +399,8 @@ def _segment_to_clip(
         params = _auto_motion_parameters(
             factory.canvas_size,
             auto_mode,
-            _as_float(auto_base_scale, 1.08) or 1.08,
-            _as_float(auto_strength, 0.08) or 0.08,
+            _as_float(auto_base_scale, 1.1) or 1.1,
+            _as_float(auto_strength, 0.12) or 0.12,
             _as_float(auto_shift, None),
         )
         position = params.get("position", position)
@@ -436,24 +436,40 @@ def _segment_to_clip(
         clip = _with_position(clip, pos_func)
 
     def _apply_scale_effect(target_clip, scale):
+        def _sanitize(value):
+            if callable(value):
+                def wrapper(t: float):
+                    result = value(t)
+                    try:
+                        return max(float(result), 1.0)
+                    except (TypeError, ValueError):
+                        return result
+
+                return wrapper
+            try:
+                return max(float(value), 1.0)
+            except (TypeError, ValueError):
+                return value
+
+        scale_clamped = _sanitize(scale)
         if hasattr(target_clip, "with_effects") and ResizeEffect is not None:
             try:
-                return target_clip.with_effects([ResizeEffect(new_size=scale)])
+                return target_clip.with_effects([ResizeEffect(new_size=scale_clamped)])
             except Exception:
                 pass
         if hasattr(target_clip, "resize"):
             try:
-                return target_clip.resize(scale)
+                return target_clip.resize(scale_clamped)
             except Exception:
                 pass
         if hasattr(target_clip, "resized"):
             try:
-                return target_clip.resized(new_size=scale)
+                return target_clip.resized(new_size=scale_clamped)
             except Exception:
                 pass
         if vfx is not None and hasattr(target_clip, "fx") and hasattr(vfx, "resize"):
             try:
-                return target_clip.fx(vfx.resize, scale)
+                return target_clip.fx(vfx.resize, scale_clamped)
             except Exception:
                 pass
         return target_clip

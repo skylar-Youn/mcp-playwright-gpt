@@ -162,9 +162,9 @@
                         <option value="none">사용 안함</option>
                     </select>
                 </label>
-                <label>강도 <input type="number" step="0.01" min="0" max="0.5" id="segment-auto-strength" placeholder="0.08"></label>
-                <label>기본 스케일 <input type="number" step="0.01" min="1" id="segment-auto-base" placeholder="1.08"></label>
-                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.35" id="segment-auto-shift" placeholder="자동"></label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.35" id="segment-auto-strength" placeholder="0.12"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="segment-auto-base" placeholder="1.10"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.3" id="segment-auto-shift" placeholder="자동"></label>
             </div>
             <div class="control-row extras">
                 <label>새 Pos X <input type="number" step="1" id="new-pos-x"></label>
@@ -189,9 +189,9 @@
                         <option value="none">사용 안함</option>
                     </select>
                 </label>
-                <label>강도 <input type="number" step="0.01" min="0" max="0.5" id="new-auto-strength" placeholder="0.08"></label>
-                <label>기본 스케일 <input type="number" step="0.01" min="1" id="new-auto-base" placeholder="1.08"></label>
-                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.35" id="new-auto-shift" placeholder="자동"></label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.35" id="new-auto-strength" placeholder="0.12"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="new-auto-base" placeholder="1.10"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.3" id="new-auto-shift" placeholder="자동"></label>
             </div>
         </div>
 
@@ -289,6 +289,44 @@ let timelineSegments = projectData ? JSON.parse(JSON.stringify(projectData.timel
 let selectedSegmentIndex = null;
 let wavesurferInstance = null;
 
+const AUTO_DEFAULT_STRENGTH = 0.12;
+const AUTO_DEFAULT_BASE_SCALE = 1.1;
+
+function setAutoControls(prefix, extras = {}, fillDefaults = false) {
+    const enabledEl = document.getElementById(`${prefix}-auto-enabled`);
+    if (enabledEl) enabledEl.checked = extras.auto_motion !== false;
+
+    const modeEl = document.getElementById(`${prefix}-auto-mode`);
+    if (modeEl) modeEl.value = extras.auto_motion_mode ?? '';
+
+    const strengthEl = document.getElementById(`${prefix}-auto-strength`);
+    if (strengthEl) {
+        let value = extras.auto_motion_strength;
+        if (value === undefined || value === null || value === '') {
+            value = fillDefaults ? AUTO_DEFAULT_STRENGTH : '';
+        }
+        strengthEl.value = value === '' ? '' : Number(value);
+    }
+
+    const baseEl = document.getElementById(`${prefix}-auto-base`);
+    if (baseEl) {
+        let value = extras.auto_motion_base_scale;
+        if (value === undefined || value === null || value === '') {
+            value = fillDefaults ? AUTO_DEFAULT_BASE_SCALE : '';
+        }
+        baseEl.value = value === '' ? '' : Number(value);
+    }
+
+    const shiftEl = document.getElementById(`${prefix}-auto-shift`);
+    if (shiftEl) {
+        let value = extras.auto_motion_shift;
+        if (value === undefined || value === null || value === '') {
+            value = '';
+        }
+        shiftEl.value = value === '' ? '' : Number(value);
+    }
+}
+
 function generateSegmentId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
         return window.crypto.randomUUID();
@@ -372,12 +410,7 @@ function clearSegmentForm() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    const autoEnabled = document.getElementById('segment-auto-enabled');
-    if (autoEnabled) autoEnabled.checked = true;
-    ['segment-auto-mode', 'segment-auto-strength', 'segment-auto-base', 'segment-auto-shift'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
+    setAutoControls('segment', {}, true);
 }
 
 function setSegmentForm(segment) {
@@ -395,13 +428,7 @@ function setSegmentForm(segment) {
     document.getElementById('segment-end-pos-y').value = endPos ? endPos[1] : '';
     document.getElementById('segment-scale-start').value = extras.scale_start ?? '';
     document.getElementById('segment-scale-end').value = extras.scale_end ?? '';
-    const autoEnabledInput = document.getElementById('segment-auto-enabled');
-    if (autoEnabledInput) autoEnabledInput.checked = extras.auto_motion !== False;
-    const autoModeSelect = document.getElementById('segment-auto-mode');
-    if (autoModeSelect) autoModeSelect.value = extras.auto_motion_mode ?? '';
-    document.getElementById('segment-auto-strength').value = extras.auto_motion_strength ?? '';
-    document.getElementById('segment-auto-base').value = extras.auto_motion_base_scale ?? '';
-    document.getElementById('segment-auto-shift').value = extras.auto_motion_shift ?? '';
+    setAutoControls('segment', extras, true);
 }
 
 function selectTimelineSegment(index, options = {}) {
@@ -569,12 +596,7 @@ function addTimelineSegment() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    const newAutoEnabledInput = document.getElementById('new-auto-enabled');
-    if (newAutoEnabledInput) newAutoEnabledInput.checked = true;
-    ['new-auto-mode', 'new-auto-strength', 'new-auto-base', 'new-auto-shift'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-    });
+    setAutoControls('new', {}, true);
     showMessage('세그먼트가 추가되었습니다. 저장 버튼을 눌러 반영하세요.', 'success');
 }
 
@@ -895,6 +917,7 @@ window.addEventListener('DOMContentLoaded', () => {
         } else {
             clearSegmentForm();
         }
+        setAutoControls('new', {}, true);
         const style = projectData.subtitle_style || {};
         const fontSizeInput = document.getElementById('subtitle-font-size');
         const yOffsetInput = document.getElementById('subtitle-y-offset');
@@ -913,18 +936,18 @@ window.addEventListener('DOMContentLoaded', () => {
         initWaveform();
     } else {
         renderVersionList([]);
-        ['subtitle-font-size', 'subtitle-y-offset', 'subtitle-stroke-width'].forEach((id, idx) => {
+        [['subtitle-font-size', 62], ['subtitle-y-offset', 0], ['subtitle-stroke-width', 2]].forEach(([id, defaultVal]) => {
             const el = document.getElementById(id);
             if (!el) return;
-            if (idx === 0) el.value = 62;
-            if (idx === 1) el.value = 0;
-            if (idx === 2) el.value = 2;
+            el.value = defaultVal;
         });
         const fontPathInput = document.getElementById('subtitle-font-path');
         if (fontPathInput) {
             fontPathInput.value = '';
             fontPathInput.dataset.initial = '';
         }
+        setAutoControls('segment', {}, true);
+        setAutoControls('new', {}, true);
     }
 });
 </script>
