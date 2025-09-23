@@ -1,23 +1,54 @@
-"""FastAPI 애플리케이션: AI 쇼츠 제작 웹 UI."""
+"""FastAPI 애플리케이션: AI 쇼츠 제작 웹 UI 및 API."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Body, FastAPI, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
+from pydantic import BaseModel
+
 from ai_shorts_maker.generator import GenerationOptions, generate_short
+from ai_shorts_maker.models import (
+    ProjectMetadata,
+    ProjectSummary,
+    ProjectVersionInfo,
+    SubtitleCreate,
+    SubtitleUpdate,
+    TimelineUpdate,
+)
+from ai_shorts_maker.repository import (
+    delete_project as repository_delete_project,
+    list_projects,
+    load_project,
+    metadata_path,
+)
+from ai_shorts_maker.services import (
+    add_subtitle,
+    delete_subtitle_line,
+    list_versions,
+    render_project,
+    replace_timeline,
+    restore_project_version,
+    update_audio_settings,
+    update_subtitle,
+)
+
+
+class RenderRequest(BaseModel):
+    burn_subs: Optional[bool] = False
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-PACKAGE_DIR = Path(__file__).resolve().parent.parent / "ai_shorts_maker"
+PACKAGE_DIR = BASE_DIR.parent / "ai_shorts_maker"
 ASSETS_DIR = PACKAGE_DIR / "assets"
 OUTPUT_DIR = PACKAGE_DIR / "outputs"
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -35,27 +66,140 @@ app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+api_router = APIRouter(prefix="/api", tags=["projects"])
+
+
+@api_router.get("/projects", response_model=List[ProjectSummary])
+def api_list_projects() -> List[ProjectSummary]:
+    return list_projects(OUTPUT_DIR)
+
+
+@api_router.get("/projects/{base_name}", response_model=ProjectMetadata)
+def api_get_project(base_name: str) -> ProjectMetadata:
+    try:
+        return load_project(base_name, OUTPUT_DIR)
+    except FileNotFoundError as exc:  # pragma: no cover - handled as HTTP 404
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@api_router.post("/projects/{base_name}/subtitles", response_model=ProjectMetadata)
+def api_add_subtitle(base_name: str, payload: SubtitleCreate) -> ProjectMetadata:
+    try:
+        return add_subtitle(base_name, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api_router.patch("/projects/{base_name}/subtitles/{subtitle_id}", response_model=ProjectMetadata)
+def api_update_subtitle(base_name: str, subtitle_id: str, payload: SubtitleUpdate) -> ProjectMetadata:
+    try:
+        return update_subtitle(base_name, subtitle_id, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api_router.delete("/projects/{base_name}/subtitles/{subtitle_id}", response_model=ProjectMetadata)
+def api_delete_subtitle(base_name: str, subtitle_id: str) -> ProjectMetadata:
+    try:
+        return delete_subtitle_line(base_name, subtitle_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api_router.patch("/projects/{base_name}/timeline", response_model=ProjectMetadata)
+def api_update_timeline(base_name: str, payload: TimelineUpdate) -> ProjectMetadata:
+    try:
+        return replace_timeline(base_name, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api_router.patch("/projects/{base_name}/audio", response_model=ProjectMetadata)
+def api_update_audio(
+    base_name: str,
+    music_enabled: Optional[bool] = Body(None),
+    music_volume: Optional[float] = Body(None),
+    ducking: Optional[float] = Body(None),
+    music_track: Optional[str] = Body(None),
+) -> ProjectMetadata:
+    try:
+        return update_audio_settings(
+            base_name,
+            music_enabled=music_enabled,
+            music_volume=music_volume,
+            ducking=ducking,
+            music_track=music_track,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@api_router.delete("/projects/{base_name}", status_code=status.HTTP_204_NO_CONTENT)
+def api_delete_project(base_name: str) -> JSONResponse:
+    try:
+        repository_delete_project(base_name, OUTPUT_DIR)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+
+@api_router.post("/projects/{base_name}/render", response_model=ProjectMetadata)
+def api_render_project(base_name: str, payload: Optional[RenderRequest] = Body(None)) -> ProjectMetadata:
+    try:
+        burn = payload.burn_subs if payload is not None else False
+        return render_project(base_name, burn_subs=bool(burn))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@api_router.get("/projects/{base_name}/versions", response_model=List[ProjectVersionInfo])
+def api_list_versions(base_name: str) -> List[ProjectVersionInfo]:
+    return list_versions(base_name)
+
+
+@api_router.post("/projects/{base_name}/versions/{version}/restore", response_model=ProjectMetadata)
+def api_restore_version(base_name: str, version: int) -> ProjectMetadata:
+    try:
+        return restore_project_version(base_name, version)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+app.include_router(api_router)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    existing_param = request.query_params.get("existing")
-    existing_outputs = list_existing_outputs()
+    selected_base = request.query_params.get("existing")
+    project_summaries = list_projects(OUTPUT_DIR)
+    version_history: List[ProjectVersionInfo] = []
+    version_history_json: List[Dict[str, Any]] = []
     result = None
     error = None
 
-    if existing_param:
-        selected = build_existing_metadata(existing_param)
-        if selected:
-            result = build_result_payload(selected)
-        else:
-            error = f"'{existing_param}' 이름의 결과를 찾을 수 없습니다."
+    if selected_base:
+        try:
+            project = load_project(selected_base, OUTPUT_DIR)
+            result = build_result_payload(project)
+            version_history = list_versions(selected_base)
+            version_history_json = [item.model_dump(exclude_none=True) for item in version_history]
+        except FileNotFoundError:
+            error = f"'{selected_base}' 프로젝트를 찾을 수 없습니다."
 
     context = {
         "request": request,
         "form_values": default_form_values(),
         "result": result,
         "error": error,
-        "existing_outputs": existing_outputs,
+        "project_summaries": project_summaries,
+        "selected_project": selected_base,
+        "version_history_json": version_history_json,
     }
     return templates.TemplateResponse("index.html", context)
 
@@ -97,7 +241,9 @@ async def generate(
         "tts_model": tts_model,
     }
 
-    existing_outputs = list_existing_outputs()
+    version_history: List[ProjectVersionInfo] = []
+    version_history_json: List[Dict[str, Any]] = []
+    error = None
 
     try:
         options = GenerationOptions(
@@ -118,20 +264,33 @@ async def generate(
             output_name=output_name or None,
         )
 
-        metadata = await run_in_threadpool(generate_short, options)
-        result = build_result_payload(metadata)
-        error = None
+        generation_result = await run_in_threadpool(generate_short, options)
+        base_name = generation_result.get("base_name")
+        if base_name:
+            project = load_project(base_name, OUTPUT_DIR)
+            result = build_result_payload(project)
+            version_history = list_versions(base_name)
+            version_history_json = [item.model_dump(exclude_none=True) for item in version_history]
+        else:
+            result = build_result_payload_dict(generation_result)
+            error = None
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Generation error: %s", exc)
         result = None
         error = str(exc)
+
+    selected_project = None
+    if result and isinstance(result.get("metadata"), dict):
+        selected_project = result["metadata"].get("base_name")
 
     context = {
         "request": request,
         "form_values": form_values,
         "result": result,
         "error": error,
-        "existing_outputs": existing_outputs,
+        "project_summaries": list_projects(OUTPUT_DIR),
+        "selected_project": selected_project,
+        "version_history_json": version_history_json,
     }
     return templates.TemplateResponse("index.html", context)
 
@@ -156,11 +315,8 @@ def default_form_values() -> Dict[str, Any]:
     }
 
 
-def build_result_payload(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    video_name = metadata.get("video_path")
-    audio_name = metadata.get("audio_path")
-    srt_name = metadata.get("subtitles_path")
-    json_name = metadata.get("metadata_path")
+def build_result_payload(project: ProjectMetadata) -> Dict[str, Any]:
+    metadata = project.model_dump(exclude_none=False)
 
     def relative_output(path_str: Optional[str]) -> Optional[str]:
         if not path_str:
@@ -171,55 +327,34 @@ def build_result_payload(metadata: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError:
             return None
 
+    metadata_json = json.dumps(metadata, ensure_ascii=False, indent=2, default=str)
+
     return {
         "metadata": metadata,
-        "video_url": relative_output(video_name),
-        "audio_url": relative_output(audio_name),
-        "srt_url": relative_output(srt_name),
-        "json_url": relative_output(json_name),
+        "metadata_json": metadata_json,
+        "video_url": relative_output(project.video_path),
+        "audio_url": relative_output(project.audio_path),
+        "srt_url": relative_output(project.subtitles_path),
+        "json_url": relative_output(str(metadata_path(project.base_name, OUTPUT_DIR))),
     }
 
 
-def list_existing_outputs() -> list[Dict[str, str]]:
-    basenames = set()
-    for path in OUTPUT_DIR.glob("*.*"):
-        if path.name.startswith(".") or "_temp_" in path.name:
-            continue
-        basenames.add(path.stem)
+def build_result_payload_dict(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def relative_output(path_str: Optional[str]) -> Optional[str]:
+        if not path_str:
+            return None
+        path = Path(path_str)
+        try:
+            return f"/outputs/{path.name}"
+        except ValueError:
+            return None
 
-    records: list[Dict[str, str]] = []
-    for base in sorted(basenames):
-        record = {"name": base, "label": base}
-        video = OUTPUT_DIR / f"{base}.mp4"
-        audio = OUTPUT_DIR / f"{base}.mp3"
-        if video.exists():
-            record["video_url"] = f"/outputs/{video.name}"
-        if audio.exists():
-            record["audio_url"] = f"/outputs/{audio.name}"
-        records.append(record)
-    return records
-
-
-def build_existing_metadata(base_name: str) -> Dict[str, Any] | None:
-    video_path = OUTPUT_DIR / f"{base_name}.mp4"
-    audio_path = OUTPUT_DIR / f"{base_name}.mp3"
-    srt_path = OUTPUT_DIR / f"{base_name}.srt"
-    json_path = OUTPUT_DIR / f"{base_name}.json"
-    script_path = OUTPUT_DIR / f"{base_name}.txt"
-
-    if not any(
-        path.exists()
-        for path in [video_path, audio_path, srt_path, json_path, script_path]
-    ):
-        return None
-
-    metadata: Dict[str, Any] = {
-        "existing": True,
-        "base_name": base_name,
-        "video_path": str(video_path) if video_path.exists() else None,
-        "audio_path": str(audio_path) if audio_path.exists() else None,
-        "subtitles_path": str(srt_path) if srt_path.exists() else None,
-        "metadata_path": str(json_path) if json_path.exists() else None,
-        "script_path": str(script_path) if script_path.exists() else None,
+    metadata_json = json.dumps(metadata, ensure_ascii=False, indent=2, default=str)
+    return {
+        "metadata": metadata,
+        "metadata_json": metadata_json,
+        "video_url": relative_output(metadata.get("video_path")),
+        "audio_url": relative_output(metadata.get("audio_path")),
+        "srt_url": relative_output(metadata.get("subtitles_path")),
+        "json_url": relative_output(metadata.get("metadata_path")),
     }
-    return metadata

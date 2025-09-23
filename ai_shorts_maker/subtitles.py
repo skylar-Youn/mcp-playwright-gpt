@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, Iterator, List
+from uuid import uuid4
 
+from .models import SubtitleLine
 
 @dataclass
 class CaptionLine:
@@ -59,6 +62,32 @@ def write_srt_file(captions: Iterable[CaptionLine], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(captions_to_srt(captions), encoding="utf-8")
     return output_path
+
+
+def subtitle_lines_from_captions(captions: List[CaptionLine]) -> List[SubtitleLine]:
+    """Convert CaptionLine objects into metadata subtitle lines with generated IDs."""
+
+    now = datetime.utcnow()
+    return [
+        SubtitleLine(
+            id=str(uuid4()),
+            start=caption.start,
+            end=caption.end,
+            text=caption.text,
+            created_at=now,
+            updated_at=now,
+        )
+        for caption in captions
+    ]
+
+
+def captions_from_subtitle_lines(subs: Iterable[SubtitleLine]) -> Iterator[CaptionLine]:
+    for sub in subs:
+        yield CaptionLine(start=sub.start, end=sub.end, text=sub.text)
+
+
+def write_srt_from_subtitles(subtitles: Iterable[SubtitleLine], output_path: Path) -> Path:
+    return write_srt_file(captions_from_subtitle_lines(subtitles), output_path)
 
 
 def format_timestamp(seconds: float) -> str:

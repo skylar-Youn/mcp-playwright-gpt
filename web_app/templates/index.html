@@ -4,63 +4,80 @@
     <meta charset="UTF-8">
     <title>AI 쇼츠 제작기</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 </head>
 <body>
 <div class="container">
     <h1>AI 쇼츠 제작기</h1>
-    <form method="post" action="/generate">
-        <div class="field">
-            <label for="topic">주제</label>
-            <input type="text" id="topic" name="topic" value="{{ form_values.topic }}" required>
-        </div>
-        <div class="field">
-            <label for="style">스타일</label>
-            <input type="text" id="style" name="style" value="{{ form_values.style }}">
-        </div>
-        <div class="field inline">
-            <label for="duration">길이 (초)</label>
-            <input type="number" id="duration" name="duration" min="10" max="120" value="{{ form_values.duration }}">
-            <label for="lang">언어</label>
-            <input type="text" id="lang" name="lang" value="{{ form_values.lang }}">
-            <label for="fps">FPS</label>
-            <input type="number" id="fps" name="fps" min="12" max="60" value="{{ form_values.fps }}">
-        </div>
-        <div class="field inline">
-            <label for="voice">TTS 음성</label>
-            <input type="text" id="voice" name="voice" value="{{ form_values.voice }}">
-            <label for="output_name">파일명 (선택)</label>
-            <input type="text" id="output_name" name="output_name" value="{{ form_values.output_name }}" placeholder="자동 생성">
-        </div>
-        <div class="field inline">
-            <label>
-                <input type="checkbox" name="music" {% if form_values.music %}checked{% endif %}>
-                배경음 사용
-            </label>
-            <label>
-                BGM 볼륨
-                <input type="number" step="0.01" min="0" max="1" name="music_volume" value="{{ form_values.music_volume }}">
-            </label>
-            <label>
-                덕킹 비율
-                <input type="number" step="0.05" min="0" max="1" name="ducking" value="{{ form_values.ducking }}">
-            </label>
-        </div>
-        <div class="field inline">
-            <label><input type="checkbox" name="burn_subs" {% if form_values.burn_subs %}checked{% endif %}> 자막 번인</label>
-            <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런 (영상 미생성)</label>
-            <label><input type="checkbox" name="save_json" {% if form_values.save_json %}checked{% endif %}> 메타데이터 JSON 저장</label>
-        </div>
-        <details class="advanced">
-            <summary>고급 설정</summary>
-            <div class="field inline">
-                <label for="script_model">스크립트 모델</label>
-                <input type="text" id="script_model" name="script_model" value="{{ form_values.script_model }}">
-                <label for="tts_model">TTS 모델</label>
-                <input type="text" id="tts_model" name="tts_model" value="{{ form_values.tts_model }}">
+
+    <section class="panel">
+        <h2>새 프로젝트 생성</h2>
+        <form method="post" action="/generate" class="generate-form">
+            <div class="field">
+                <label for="topic">주제</label>
+                <input type="text" id="topic" name="topic" value="{{ form_values.topic }}" required>
             </div>
-        </details>
-        <button type="submit">생성하기</button>
-    </form>
+            <div class="field">
+                <label for="style">스타일</label>
+                <input type="text" id="style" name="style" value="{{ form_values.style }}">
+            </div>
+            <div class="field inline">
+                <label for="duration">길이(초)</label>
+                <input type="number" id="duration" name="duration" min="10" max="180" value="{{ form_values.duration }}">
+                <label for="lang">언어</label>
+                <input type="text" id="lang" name="lang" value="{{ form_values.lang }}">
+                <label for="fps">FPS</label>
+                <input type="number" id="fps" name="fps" min="12" max="60" value="{{ form_values.fps }}">
+            </div>
+            <div class="field inline">
+                <label for="voice">TTS 음성</label>
+                <input type="text" id="voice" name="voice" value="{{ form_values.voice }}">
+                <label for="output_name">파일명(선택)</label>
+                <input type="text" id="output_name" name="output_name" value="{{ form_values.output_name }}" placeholder="자동 생성">
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="music" {% if form_values.music %}checked{% endif %}> 배경음 사용</label>
+                <label>볼륨<input type="number" step="0.01" min="0" max="1" name="music_volume" value="{{ form_values.music_volume }}"></label>
+                <label>덕킹<input type="number" step="0.05" min="0" max="1" name="ducking" value="{{ form_values.ducking }}"></label>
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="burn_subs" {% if form_values.burn_subs %}checked{% endif %}> 자막 번인</label>
+                <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런</label>
+                <label><input type="checkbox" name="save_json" {% if form_values.save_json %}checked{% endif %}> JSON 저장</label>
+            </div>
+            <details class="advanced">
+                <summary>고급 설정</summary>
+                <div class="field inline">
+                    <label for="script_model">스크립트 모델</label>
+                    <input type="text" id="script_model" name="script_model" value="{{ form_values.script_model }}">
+                    <label for="tts_model">TTS 모델</label>
+                    <input type="text" id="tts_model" name="tts_model" value="{{ form_values.tts_model }}">
+                </div>
+            </details>
+            <button type="submit">생성하기</button>
+        </form>
+    </section>
+
+    <section class="panel">
+        <h2>기존 프로젝트 불러오기</h2>
+        <form method="get" action="/" class="existing-form">
+            <label for="existing">프로젝트 선택</label>
+            <select id="existing" name="existing">
+                <option value="">선택하세요</option>
+                {% for item in project_summaries %}
+                <option value="{{ item.base_name }}" {% if selected_project == item.base_name %}selected{% endif %}>
+                    {{ item.base_name }} ({{ item.duration or '-' }}s)
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit">불러오기</button>
+        </form>
+        <ul class="existing-list">
+            {% for item in project_summaries %}
+            <li>{{ item.base_name }} - {{ item.topic or '토픽 없음' }} <small>({{ item.updated_at }})</small></li>
+            {% endfor %}
+        </ul>
+    </section>
 
     {% if error %}
     <div class="alert error">
@@ -69,41 +86,573 @@
     {% endif %}
 
     {% if result %}
-    <div class="result">
-        <h2>생성 완료</h2>
+    <section class="panel project-detail">
+        <h2>프로젝트 세부 정보</h2>
         <div class="links">
             {% if result.video_url %}<a href="{{ result.video_url }}" target="_blank">영상 다운로드</a>{% endif %}
-            {% if result.audio_url %}<a href="{{ result.audio_url }}" target="_blank">음성</a>{% endif %}
-            {% if result.srt_url %}<a href="{{ result.srt_url }}" target="_blank">자막</a>{% endif %}
+            {% if result.audio_url %}<a href="{{ result.audio_url }}" target="_blank">음성 파일</a>{% endif %}
+            {% if result.srt_url %}<a href="{{ result.srt_url }}" target="_blank">자막(SRT)</a>{% endif %}
             {% if result.json_url %}<a href="{{ result.json_url }}" target="_blank">메타데이터</a>{% endif %}
         </div>
-        <pre>{{ result.metadata | tojson(indent=2, ensure_ascii=False) }}</pre>
-    </div>
-    {% endif %}
+        <pre>{{ result.metadata_json }}</pre>
 
-    {% if existing_outputs %}
-    <div class="existing">
-        <h2>기존 결과 불러오기</h2>
-        <form method="get" action="/" class="existing-form">
-            <label for="existing">파일 선택</label>
-            <select id="existing" name="existing">
-                {% for item in existing_outputs %}
-                <option value="{{ item.name }}" {% if result and result.metadata and result.metadata.get('base_name') == item.name %}selected{% endif %}>{{ item.label }}</option>
+        <div class="timeline-visual">
+            <div class="wave-controls">
+                <button type="button" onclick="wavePlay()">▶ 재생</button>
+                <button type="button" onclick="wavePause()">⏸ 일시정지</button>
+                <span id="current-time">0.00s</span>
+            </div>
+            <div id="waveform"></div>
+            <div id="timeline-overlay"></div>
+        </div>
+
+        <div class="timeline-controls">
+            <h3>타임라인 세그먼트</h3>
+            <div class="control-row">
+                <label>세그먼트 ID <input type="text" id="segment-id" readonly></label>
+                <label>시작 <input type="number" step="0.1" id="segment-start"></label>
+                <label>끝 <input type="number" step="0.1" id="segment-end"></label>
+            </div>
+            <div class="control-row">
+                <label>소스 <input type="text" id="segment-source"></label>
+                <label>타입
+                    <select id="segment-type">
+                        <option value="broll">broll</option>
+                        <option value="image">image</option>
+                        <option value="audio">audio</option>
+                    </select>
+                </label>
+                <button type="button" onclick="applyTimelineEdit('{{ result.metadata.base_name }}')">세그먼트 적용</button>
+                <button type="button" onclick="refreshVersionHistory('{{ result.metadata.base_name }}')">버전 새로고침</button>
+            </div>
+            <div class="control-row secondary">
+                <label>새 시작 <input type="number" step="0.1" id="new-segment-start"></label>
+                <label>새 끝 <input type="number" step="0.1" id="new-segment-end"></label>
+                <label>새 소스 <input type="text" id="new-segment-source" placeholder="auto"></label>
+                <label>타입
+                    <select id="new-segment-type">
+                        <option value="broll" selected>broll</option>
+                        <option value="image">image</option>
+                        <option value="audio">audio</option>
+                    </select>
+                </label>
+                <button type="button" onclick="addTimelineSegment()">세그먼트 추가</button>
+                <button type="button" class="danger" onclick="removeTimelineSegment()">선택 삭제</button>
+            </div>
+        </div>
+
+        <div class="timeline-editor">
+            <h3>타임라인 JSON</h3>
+            <textarea id="timeline-json">{{ result.metadata.timeline | tojson(indent=2) }}</textarea>
+            <button type="button" onclick="updateTimeline('{{ result.metadata.base_name }}')">타임라인 저장</button>
+        </div>
+
+        <div class="subtitle-editor">
+            <h3>자막 편집</h3>
+            <table>
+                <thead>
+                <tr>
+                    <th>Start</th><th>End</th><th>Text</th><th></th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for sub in result.metadata.captions %}
+                <tr>
+                    <td><input type="number" step="0.1" value="{{ sub.start }}" data-sub-id="{{ sub.id }}" data-field="start"></td>
+                    <td><input type="number" step="0.1" value="{{ sub.end }}" data-sub-id="{{ sub.id }}" data-field="end"></td>
+                    <td><textarea data-sub-id="{{ sub.id }}" data-field="text">{{ sub.text }}</textarea></td>
+                    <td>
+                        <button type="button" onclick="updateSubtitle('{{ result.metadata.base_name }}', '{{ sub.id }}')">저장</button>
+                        <button type="button" class="danger" onclick="deleteSubtitle('{{ result.metadata.base_name }}', '{{ sub.id }}')">삭제</button>
+                    </td>
+                </tr>
                 {% endfor %}
-            </select>
-            <button type="submit">불러오기</button>
-        </form>
-        <ul class="existing-list">
-            {% for item in existing_outputs %}
-            <li>
-                <span>{{ item.label }}</span>
-                {% if item.video_url %}<a href="{{ item.video_url }}" target="_blank">영상</a>{% endif %}
-                {% if item.audio_url %}<a href="{{ item.audio_url }}" target="_blank">음성</a>{% endif %}
-            </li>
-            {% endfor %}
-        </ul>
-    </div>
+                </tbody>
+            </table>
+            <div class="add-subtitle">
+                <h4>자막 추가</h4>
+                <input type="number" step="0.1" id="new-start" placeholder="start">
+                <input type="number" step="0.1" id="new-end" placeholder="end">
+                <input type="text" id="new-text" placeholder="text">
+                <button type="button" onclick="createSubtitle('{{ result.metadata.base_name }}')">추가</button>
+            </div>
+        </div>
+
+        <div class="audio-editor">
+            <h3>오디오 설정</h3>
+            <label><input type="checkbox" id="music-enabled" {% if result.metadata.audio_settings.music_enabled %}checked{% endif %}> 배경음 사용</label>
+            <label>볼륨 <input type="number" step="0.01" min="0" max="1" id="music-volume" value="{{ result.metadata.audio_settings.music_volume }}"></label>
+            <label>덕킹 <input type="number" step="0.05" min="0" max="1" id="ducking" value="{{ result.metadata.audio_settings.ducking }}"></label>
+            <label>배경음 경로 <input type="text" id="music-track" value="{{ result.metadata.audio_settings.music_track or '' }}" placeholder="assets/music/..."></label>
+            <button type="button" onclick="updateAudio('{{ result.metadata.base_name }}')">오디오 저장</button>
+        </div>
+
+        <div class="versions">
+            <h3>버전 히스토리</h3>
+            <ul id="version-list"></ul>
+        </div>
+
+        <div class="actions">
+            <label><input type="checkbox" id="burn-render"> 자막 번인 후 재렌더</label>
+            <button type="button" onclick="requestRender('{{ result.metadata.base_name }}')">재렌더</button>
+            <button type="button" class="danger" onclick="deleteProject('{{ result.metadata.base_name }}')">프로젝트 삭제</button>
+        </div>
+
+        <div id="message"></div>
+    </section>
     {% endif %}
 </div>
+
+<script>
+const messageBox = document.getElementById('message');
+function showMessage(text, type = 'info') {
+    if (!messageBox) return;
+    messageBox.textContent = text;
+    messageBox.className = type;
+}
+
+{% if result %}
+const projectData = {{ result.metadata_json | safe }};
+const audioUrl = {{ result.audio_url | tojson }};
+const initialVersionHistory = {{ version_history_json | tojson }};
+{% else %}
+const projectData = null;
+const audioUrl = null;
+const initialVersionHistory = [];
+{% endif %}
+
+let versionHistory = Array.isArray(initialVersionHistory) ? [...initialVersionHistory] : [];
+let timelineSegments = projectData ? JSON.parse(JSON.stringify(projectData.timeline || [])) : [];
+let selectedSegmentIndex = null;
+let wavesurferInstance = null;
+
+function generateSegmentId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `seg-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+function ensureNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeTimelineSegments() {
+    timelineSegments = (timelineSegments || []).map((seg) => {
+        const start = ensureNumber(seg.start, 0);
+        const end = ensureNumber(seg.end, start + 0.1);
+        return {
+            id: seg.id || generateSegmentId(),
+            media_type: seg.media_type || 'broll',
+            source: seg.source ?? 'auto',
+            start,
+            end: end <= start ? start + 0.1 : end,
+            extras: seg.extras || {},
+        };
+    }).sort((a, b) => a.start - b.start);
+    if (projectData) {
+        projectData.timeline = timelineSegments;
+    }
+    if (!timelineSegments.length) {
+        selectedSegmentIndex = null;
+    } else if (selectedSegmentIndex === null || selectedSegmentIndex >= timelineSegments.length) {
+        selectedSegmentIndex = 0;
+    }
+}
+
+function syncTimelineTextarea() {
+    const textarea = document.getElementById('timeline-json');
+    if (textarea) {
+        textarea.value = JSON.stringify(timelineSegments, null, 2);
+    }
+    if (projectData) {
+        projectData.timeline = timelineSegments;
+    }
+}
+
+function renderTimelineOverlay() {
+    const overlay = document.getElementById('timeline-overlay');
+    if (!overlay || !projectData) return;
+    overlay.innerHTML = '';
+    const duration = projectData.duration || 1;
+    timelineSegments.forEach((segment, idx) => {
+        const bar = document.createElement('div');
+        const startPct = (segment.start / duration) * 100;
+        const widthPct = Math.max(((segment.end - segment.start) / duration) * 100, 0.5);
+        bar.className = 'timeline-segment-bar';
+        if (idx === selectedSegmentIndex) {
+            bar.classList.add('selected');
+        }
+        bar.style.left = `${Math.max(0, Math.min(startPct, 100))}%`;
+        bar.style.width = `${Math.min(widthPct, 100)}%`;
+        bar.title = `${segment.media_type} • ${segment.source || 'auto'}`;
+        bar.onclick = () => selectTimelineSegment(idx, { seek: true });
+        overlay.appendChild(bar);
+    });
+}
+
+function clearSegmentForm() {
+    ['segment-id', 'segment-start', 'segment-end', 'segment-source'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const typeSelect = document.getElementById('segment-type');
+    if (typeSelect) typeSelect.value = 'broll';
+}
+
+function setSegmentForm(segment) {
+    document.getElementById('segment-id').value = segment.id || '';
+    document.getElementById('segment-start').value = segment.start ?? 0;
+    document.getElementById('segment-end').value = segment.end ?? segment.start + 0.1;
+    document.getElementById('segment-source').value = segment.source || 'auto';
+    document.getElementById('segment-type').value = segment.media_type || 'broll';
+}
+
+function selectTimelineSegment(index, options = {}) {
+    if (!timelineSegments[index]) return;
+    const { seek = true } = options;
+    selectedSegmentIndex = index;
+    const segment = timelineSegments[index];
+    setSegmentForm(segment);
+    renderTimelineOverlay();
+    if (seek && wavesurferInstance && projectData?.duration) {
+        const duration = projectData.duration || 1;
+        const ratio = Math.min(Math.max(segment.start / duration, 0), 1);
+        wavesurferInstance.seekTo(ratio);
+    }
+}
+
+function applyTimelineEdit(baseName) {
+    if (selectedSegmentIndex === null) {
+        showMessage('편집할 세그먼트를 선택하세요.', 'error');
+        return;
+    }
+    const segment = timelineSegments[selectedSegmentIndex];
+    const start = ensureNumber(document.getElementById('segment-start').value, segment.start);
+    const end = ensureNumber(document.getElementById('segment-end').value, segment.end);
+    segment.id = document.getElementById('segment-id').value || segment.id || generateSegmentId();
+    segment.start = start;
+    segment.end = end <= start ? start + 0.1 : end;
+    segment.source = document.getElementById('segment-source').value || 'auto';
+    segment.media_type = document.getElementById('segment-type').value || 'broll';
+    segment.extras = segment.extras || {};
+
+    timelineSegments.sort((a, b) => a.start - b.start);
+    selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === segment.id);
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    showMessage('세그먼트가 수정되었습니다. 저장 버튼을 눌러 반영하세요.', 'info');
+}
+
+function addTimelineSegment() {
+    const start = ensureNumber(document.getElementById('new-segment-start').value, 0);
+    const end = ensureNumber(document.getElementById('new-segment-end').value, start + 0.1);
+    const source = document.getElementById('new-segment-source').value || 'auto';
+    const mediaType = document.getElementById('new-segment-type').value || 'broll';
+
+    const newSegment = {
+        id: generateSegmentId(),
+        media_type: mediaType,
+        source,
+        start,
+        end: end <= start ? start + 0.1 : end,
+        extras: {},
+    };
+    timelineSegments.push(newSegment);
+    timelineSegments.sort((a, b) => a.start - b.start);
+    selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === newSegment.id);
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    setSegmentForm(newSegment);
+    document.getElementById('new-segment-start').value = '';
+    document.getElementById('new-segment-end').value = '';
+    document.getElementById('new-segment-source').value = '';
+    document.getElementById('new-segment-type').value = 'broll';
+    showMessage('세그먼트가 추가되었습니다. 저장 버튼을 눌러 반영하세요.', 'success');
+}
+
+function removeTimelineSegment() {
+    if (selectedSegmentIndex === null) {
+        showMessage('삭제할 세그먼트를 선택하세요.', 'error');
+        return;
+    }
+    timelineSegments.splice(selectedSegmentIndex, 1);
+    if (!timelineSegments.length) {
+        selectedSegmentIndex = null;
+        clearSegmentForm();
+    } else {
+        selectedSegmentIndex = Math.min(selectedSegmentIndex, timelineSegments.length - 1);
+        setSegmentForm(timelineSegments[selectedSegmentIndex]);
+    }
+    syncTimelineTextarea();
+    renderTimelineOverlay();
+    showMessage('세그먼트가 제거되었습니다. 저장 버튼을 눌러 반영하세요.', 'info');
+}
+
+async function updateTimeline(baseName) {
+    const textarea = document.getElementById('timeline-json');
+    if (!textarea) return;
+    try {
+        const parsed = JSON.parse(textarea.value || '[]');
+        timelineSegments = Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        showMessage('유효한 JSON 형식이 아닙니다.', 'error');
+        return;
+    }
+    normalizeTimelineSegments();
+    const res = await fetch(`/api/projects/${baseName}/timeline`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ segments: timelineSegments })
+    });
+    if (res.ok) {
+        showMessage('타임라인이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '타임라인 저장 실패', 'error');
+    }
+}
+
+async function updateSubtitle(baseName, subtitleId) {
+    const startInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="start"]`);
+    const endInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="end"]`);
+    const textInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="text"]`);
+    if (!startInput || !endInput || !textInput) return;
+
+    const payload = {
+        start: parseFloat(startInput.value),
+        end: parseFloat(endInput.value),
+        text: textInput.value
+    };
+
+    const res = await fetch(`/api/projects/${baseName}/subtitles/${subtitleId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+        showMessage('자막이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 저장 실패', 'error');
+    }
+}
+
+async function deleteSubtitle(baseName, subtitleId) {
+    if (!confirm('선택한 자막을 삭제할까요?')) return;
+    const res = await fetch(`/api/projects/${baseName}/subtitles/${subtitleId}`, { method: 'DELETE' });
+    if (res.ok) {
+        showMessage('자막이 삭제되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 삭제 실패', 'error');
+    }
+}
+
+async function createSubtitle(baseName) {
+    const start = parseFloat(document.getElementById('new-start').value);
+    const end = parseFloat(document.getElementById('new-end').value);
+    const text = document.getElementById('new-text').value;
+    if (Number.isNaN(start) || Number.isNaN(end) || !text) {
+        showMessage('start, end, text를 모두 입력해주세요.', 'error');
+        return;
+    }
+    const res = await fetch(`/api/projects/${baseName}/subtitles`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ start, end, text })
+    });
+    if (res.ok) {
+        showMessage('자막이 추가되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 추가 실패', 'error');
+    }
+}
+
+async function updateAudio(baseName) {
+    const enabled = document.getElementById('music-enabled').checked;
+    const volume = parseFloat(document.getElementById('music-volume').value);
+    const ducking = parseFloat(document.getElementById('ducking').value);
+    const track = document.getElementById('music-track').value;
+
+    const res = await fetch(`/api/projects/${baseName}/audio`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            music_enabled: enabled,
+            music_volume: volume,
+            ducking,
+            music_track: track || null
+        })
+    });
+    if (res.ok) {
+        showMessage('오디오 설정이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '오디오 저장 실패', 'error');
+    }
+}
+
+async function deleteProject(baseName) {
+    if (!confirm('프로젝트의 모든 파일을 삭제할까요?')) return;
+    const res = await fetch(`/api/projects/${baseName}`, { method: 'DELETE' });
+    if (res.status === 204) {
+        showMessage('프로젝트가 삭제되었습니다.', 'success');
+        setTimeout(() => window.location.href = '/', 500);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '삭제 실패', 'error');
+    }
+}
+
+async function requestRender(baseName) {
+    const burn = document.getElementById('burn-render')?.checked || false;
+    showMessage('재렌더링을 시작합니다...', 'info');
+    const res = await fetch(`/api/projects/${baseName}/render`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ burn_subs: burn })
+    });
+    if (res.ok) {
+        showMessage('재렌더링이 완료되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 800);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '재렌더링 실패', 'error');
+    }
+}
+
+function renderVersionList(list) {
+    const container = document.getElementById('version-list');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!list.length) {
+        const li = document.createElement('li');
+        li.textContent = '저장된 버전이 없습니다.';
+        container.appendChild(li);
+        return;
+    }
+    list
+        .slice()
+        .sort((a, b) => (b.version || 0) - (a.version || 0))
+        .forEach((item) => {
+            const li = document.createElement('li');
+            const dateLabel = item.updated_at ? ` (${item.updated_at})` : '';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = '복원';
+            button.onclick = () => restoreVersion(projectData.base_name, item.version);
+            li.textContent = `v${item.version}${dateLabel} `;
+            li.appendChild(button);
+            container.appendChild(li);
+        });
+}
+
+async function refreshVersionHistory(baseName) {
+    const res = await fetch(`/api/projects/${baseName}/versions`);
+    if (res.ok) {
+        versionHistory = await res.json();
+        renderVersionList(versionHistory);
+    }
+}
+
+async function restoreVersion(baseName, version) {
+    if (!confirm(`v${version} 버전으로 복원할까요? 현재 상태는 새 버전으로 저장됩니다.`)) return;
+    const res = await fetch(`/api/projects/${baseName}/versions/${version}/restore`, { method: 'POST' });
+    if (res.ok) {
+        showMessage('복원되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 700);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '복원 실패', 'error');
+    }
+}
+
+function wavePlay() {
+    if (wavesurferInstance) {
+        wavesurferInstance.play();
+    }
+}
+
+function wavePause() {
+    if (wavesurferInstance) {
+        wavesurferInstance.pause();
+    }
+}
+
+function updateCurrentTimeDisplay(time) {
+    const label = document.getElementById('current-time');
+    if (!label) return;
+    const safeTime = Number.isFinite(time) ? time : 0;
+    label.textContent = `${safeTime.toFixed(2)}s`;
+}
+
+function findSegmentIndexByTime(time) {
+    return timelineSegments.findIndex((segment) => time >= segment.start && time <= segment.end + 0.05);
+}
+
+function maybeSelectSegmentByTime(time) {
+    if (!timelineSegments.length) return;
+    const idx = findSegmentIndexByTime(time);
+    if (idx !== -1 && idx !== selectedSegmentIndex) {
+        selectTimelineSegment(idx, { seek: false });
+    }
+}
+
+function initWaveform() {
+    if (!projectData || !audioUrl || !document.getElementById('waveform')) return;
+    wavesurferInstance = WaveSurfer.create({
+        container: '#waveform',
+        waveColor: '#4bd4ff',
+        progressColor: '#5b7fff',
+        cursorColor: '#ffd166',
+        height: 96,
+    });
+    wavesurferInstance.load(audioUrl);
+    wavesurferInstance.on('ready', () => {
+        updateCurrentTimeDisplay(0);
+        renderTimelineOverlay();
+    });
+    wavesurferInstance.on('audioprocess', (time) => {
+        const current = Number.isFinite(time) ? time : wavesurferInstance.getCurrentTime();
+        updateCurrentTimeDisplay(current);
+        maybeSelectSegmentByTime(current);
+    });
+    wavesurferInstance.on('seek', () => {
+        const current = wavesurferInstance.getCurrentTime();
+        updateCurrentTimeDisplay(current);
+        maybeSelectSegmentByTime(current);
+    });
+}
+
+function addInitialVersionList() {
+    renderVersionList(versionHistory);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    if (projectData) {
+        normalizeTimelineSegments();
+        syncTimelineTextarea();
+        renderTimelineOverlay();
+        if (timelineSegments.length) {
+            selectTimelineSegment(selectedSegmentIndex ?? 0, { seek: false });
+        } else {
+            clearSegmentForm();
+        }
+        addInitialVersionList();
+        refreshVersionHistory(projectData.base_name);
+        initWaveform();
+    } else {
+        renderVersionList([]);
+    }
+});
+</script>
 </body>
 </html>

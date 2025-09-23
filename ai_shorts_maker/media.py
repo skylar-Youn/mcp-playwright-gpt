@@ -237,12 +237,15 @@ class MediaFactory:
         music_volume: float = 0.12,
         ducking: float = 0.35,
         use_music: bool = True,
-    ):
+        music_path: Optional[Path] = None,
+    ) -> tuple:
         voice = AudioFileClip(str(narration_audio))
         base_audio = voice
+        selected_track: Optional[Path] = None
         if use_music:
-            track = self.pick_music_track()
+            track = music_path if music_path is not None else self.pick_music_track()
             if track:
+                selected_track = track
                 music = AudioFileClip(str(track))
                 music = _adjust_volume(music, max(music_volume, 0.0))
                 time_candidates = [
@@ -271,7 +274,7 @@ class MediaFactory:
             final_audio = _set_duration(base_audio, target_duration)
         else:
             final_audio = base_audio
-        return _set_audio(video_clip, final_audio)
+        return _set_audio(video_clip, final_audio), selected_track
 
     def pick_music_track(self) -> Optional[Path]:
         tracks = [p for p in self.music_dir.glob("*") if p.suffix.lower() in SUPPORTED_MUSIC_EXTENSIONS]
