@@ -7,20 +7,23 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from uuid import uuid4
 
 try:
     from moviepy.editor import AudioFileClip
 except ModuleNotFoundError:  # moviepy>=2.0 removes the editor module
     from moviepy import AudioFileClip
 
+from .models import AudioSettings, ProjectMetadata, TimelineSegment
 from .media import MediaFactory
 from .openai_client import OpenAIShortsClient
 from .prompts import build_script_prompt
 from .subtitles import (
     allocate_caption_timings,
     split_script_into_sentences,
-    write_srt_file,
+    subtitle_lines_from_captions,
+    write_srt_from_subtitles,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,7 +94,7 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
     script_path.write_text(script_text, encoding="utf-8")
     logger.info("Saved script to %s", script_path)
 
-    metadata: Dict[str, Any] = {
+    base_metadata: Dict[str, Any] = {
         "topic": options.topic,
         "style": options.style,
         "language": options.lang,
@@ -105,10 +108,10 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
     if options.dry_run:
         if options.save_json:
             json_path = options.output_dir / f"{output_name}.json"
-            json_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
+            json_path.write_text(json.dumps(base_metadata, ensure_ascii=False, indent=2))
             logger.info("Saved metadata to %s", json_path)
-            metadata["metadata_path"] = str(json_path)
-        return metadata
+            base_metadata["metadata_path"] = str(json_path)
+        return base_metadata
 
     # Voice synthesis
     narration_path = options.output_dir / f"{output_name}.mp3"
@@ -123,15 +126,16 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
     voice_duration = narration_clip.duration
 
     captions = allocate_caption_timings(sentences, voice_duration)
+    subtitle_lines = subtitle_lines_from_captions(captions)
     srt_path = options.output_dir / f"{output_name}.srt"
-    write_srt_file(captions, srt_path)
+    write_srt_from_subtitles(subtitle_lines, srt_path)
     logger.info("Saved subtitles to %s", srt_path)
 
     media_factory = MediaFactory(options.assets_dir, fps=options.fps)
     logger.info("Building background visuals (duration %.2fs)...", voice_duration)
     background_clip = media_factory.build_broll_clip(voice_duration)
 
-    video_with_audio = media_factory.attach_audio(
+    video_with_audio, selected_music = media_factory.attach_audio(
         background_clip,
         narration_path,
         music_volume=options.music_volume,
@@ -160,19 +164,69 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
         background_clip.close()
         video_with_audio.close()
 
-    metadata.update(
-        {
-            "audio_path": str(narration_path),
-            "video_path": str(output_video_path),
-            "subtitles_path": str(srt_path),
-            "captions": [cap.__dict__ for cap in captions],
-        }
+    metadata_model = ProjectMetadata(
+        base_name=output_name,
+        topic=options.topic,
+        style=options.style,
+        language=options.lang,
+        duration=voice_duration,
+        script_path=str(script_path),
+        script_text_path=str(script_path),
+        audio_path=str(narration_path),
+        subtitles_path=str(srt_path),
+        video_path=str(output_video_path),
+        captions=subtitle_lines,
+        timeline=[
+            TimelineSegment(
+                id=str(uuid4()),
+                media_type="broll",
+                source="auto",
+                start=0.0,
+                end=voice_duration,
+                extras={"fps": options.fps},
+            )
+        ],
+        audio_settings=AudioSettings(
+            music_enabled=options.music,
+            music_volume=options.music_volume,
+            ducking=options.ducking,
+            voice_path=str(narration_path),
+            music_track=str(selected_music) if selected_music else None,
+        ),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+        extra={"script_model": options.script_model, "tts_model": options.tts_model},
     )
 
-    if options.save_json:
-        json_path = options.output_dir / f"{output_name}.json"
-        json_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2))
-        logger.info("Saved metadata to %s", json_path)
-        metadata["metadata_path"] = str(json_path)
+    metadata_dict = base_metadata | {
+        "audio_path": str(narration_path),
+        "video_path": str(output_video_path),
+        "subtitles_path": str(srt_path),
+        "captions": [caption.model_dump() for caption in subtitle_lines],
+        "metadata": metadata_model.model_dump(),
+    }
 
-    return metadata
+    metadata_path = options.output_dir / f"{output_name}.metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            metadata_model.model_dump(exclude_none=False),
+            ensure_ascii=False,
+            indent=2,
+            default=str,
+        )
+    )
+    metadata_dict["metadata_path"] = str(metadata_path)
+
+    if options.save_json and metadata_path != options.output_dir / f"{output_name}.json":
+        json_path = options.output_dir / f"{output_name}.json"
+        json_path.write_text(
+            json.dumps(
+                metadata_model.model_dump(exclude_none=False),
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
+        logger.info("Saved metadata snapshot to %s", json_path)
+
+    return metadata_dict
