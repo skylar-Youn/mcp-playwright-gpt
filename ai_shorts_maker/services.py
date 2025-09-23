@@ -19,6 +19,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from moviepy import ImageClip  # type: ignore
 
+try:
+    from moviepy.video.fx.Resize import Resize as ResizeEffect
+except ImportError:  # pragma: no cover - legacy moviepy
+    ResizeEffect = None
+
+try:
+    from moviepy.video.fx import all as vfx
+except ImportError:  # pragma: no cover - legacy moviepy
+    vfx = None
+
 USE_WITH_DURATION = hasattr(ImageClip, "with_duration")
 USE_WITH_POSITION = hasattr(ImageClip, "with_position")
 
@@ -53,6 +63,16 @@ def _with_end(clip, end):
     clip.duration = end - getattr(clip, "start", 0)
     return clip
 
+
+def _with_opacity(clip, opacity: float):
+    if opacity is None:
+        return clip
+    if hasattr(clip, "with_opacity"):
+        return clip.with_opacity(opacity)
+    if hasattr(clip, "set_opacity"):
+        return clip.set_opacity(opacity)
+    return clip
+
 from .media import MediaFactory, _resize_clip, _set_duration, _set_fps, _video_loop
 from .models import (
     ProjectMetadata,
@@ -74,6 +94,7 @@ from .subtitles import captions_from_subtitle_lines, write_srt_from_subtitles
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+UNSET = object()
 
 
 def _touch(metadata: ProjectMetadata) -> None:
@@ -81,12 +102,25 @@ def _touch(metadata: ProjectMetadata) -> None:
     metadata.updated_at = datetime.utcnow()
 
 
+def _round_time(value: Optional[float], *, digits: int = 1) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(round(float(value), digits))
+    except (TypeError, ValueError):
+        return None
+
+
 def add_subtitle(base_name: str, payload: SubtitleCreate) -> ProjectMetadata:
     metadata = load_project(base_name)
+    start = _round_time(payload.start)
+    end = _round_time(payload.end)
+    if start is None or end is None:
+        raise ValueError("Invalid subtitle timing")
     new_line = SubtitleLine(
         id=str(uuid4()),
-        start=payload.start,
-        end=payload.end,
+        start=start,
+        end=end,
         text=payload.text,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -104,9 +138,15 @@ def update_subtitle(base_name: str, subtitle_id: str, payload: SubtitleUpdate) -
         raise KeyError(f"Subtitle {subtitle_id} not found")
 
     if payload.start is not None:
-        target.start = payload.start
+        rounded = _round_time(payload.start)
+        if rounded is None:
+            raise ValueError("Invalid start time")
+        target.start = rounded
     if payload.end is not None:
-        target.end = payload.end
+        rounded = _round_time(payload.end)
+        if rounded is None:
+            raise ValueError("Invalid end time")
+        target.end = rounded
     if payload.text is not None:
         target.text = payload.text
     target.updated_at = datetime.utcnow()
@@ -154,6 +194,28 @@ def update_audio_settings(
     return save_project(metadata)
 
 
+def update_subtitle_style(
+    base_name: str,
+    *,
+    font_size: Optional[int] = None,
+    y_offset: Optional[int] = None,
+    stroke_width: Optional[int] = None,
+    font_path: Optional[str] | object = UNSET,
+) -> ProjectMetadata:
+    metadata = load_project(base_name)
+    style = metadata.subtitle_style
+    if font_size is not None:
+        style.font_size = font_size
+    if y_offset is not None:
+        style.y_offset = y_offset
+    if stroke_width is not None:
+        style.stroke_width = stroke_width
+    if font_path is not UNSET:
+        style.font_path = (font_path or None)
+    _touch(metadata)
+    return save_project(metadata)
+
+
 def _resolve_media_path(source: Optional[str]) -> Optional[Path]:
     if not source or source == "auto":
         return None
@@ -178,6 +240,91 @@ def _is_overlay(segment: TimelineSegment) -> bool:
     return bool(segment.extras.get("overlay"))
 
 
+def _auto_motion_parameters(
+    canvas_size: tuple[int, int],
+    mode: str,
+    base_scale: float,
+    strength: float,
+    shift_ratio: Optional[float],
+) -> dict[str, Optional[float | tuple[float, float]]]:
+    width, height = canvas_size
+    center_x = width / 2
+    center_y = height / 2
+
+    mode = (mode or "kenburns").lower()
+    strength = max(0.0, min(strength, 0.5))
+    shift_ratio = shift_ratio if shift_ratio is not None else strength * 0.6
+    shift_ratio = max(0.0, min(shift_ratio, 0.35))
+    base_scale = max(base_scale, 1.0)
+    base_scale = max(base_scale, 1.0 + shift_ratio * 1.1)
+
+    offset_x = width * shift_ratio * 0.5
+    offset_y = height * shift_ratio * 0.5
+
+    if mode in {"none", "off"}:
+        return {"scale_start": None, "scale_end": None, "position": None, "position_end": None}
+
+    if mode == "zoom_out":
+        return {
+            "scale_start": base_scale * (1.0 + strength),
+            "scale_end": base_scale,
+            "position": (center_x, center_y),
+            "position_end": (center_x, center_y),
+        }
+
+    if mode == "zoom_in":
+        return {
+            "scale_start": base_scale,
+            "scale_end": base_scale * (1.0 + strength),
+            "position": (center_x, center_y),
+            "position_end": (center_x, center_y),
+        }
+
+    if mode == "pan_left":
+        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        return {
+            "scale_start": base_scale,
+            "scale_end": base_scale,
+            "position": (center_x + offset_x, center_y),
+            "position_end": (center_x - offset_x, center_y),
+        }
+
+    if mode == "pan_right":
+        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        return {
+            "scale_start": base_scale,
+            "scale_end": base_scale,
+            "position": (center_x - offset_x, center_y),
+            "position_end": (center_x + offset_x, center_y),
+        }
+
+    if mode == "pan_up":
+        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        return {
+            "scale_start": base_scale,
+            "scale_end": base_scale,
+            "position": (center_x, center_y + offset_y),
+            "position_end": (center_x, center_y - offset_y),
+        }
+
+    if mode == "pan_down":
+        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        return {
+            "scale_start": base_scale,
+            "scale_end": base_scale,
+            "position": (center_x, center_y - offset_y),
+            "position_end": (center_x, center_y + offset_y),
+        }
+
+    # Default: ken burns style (zoom in with gentle vertical drift)
+    return {
+        "scale_start": base_scale,
+        "scale_end": base_scale * (1.0 + strength),
+        "position": (center_x, center_y + offset_y),
+        "position_end": (center_x, center_y - offset_y),
+    }
+
+
 def _segment_to_clip(
     segment: TimelineSegment,
     factory: MediaFactory,
@@ -186,6 +333,7 @@ def _segment_to_clip(
 ) -> VideoFileClip:
     duration = max(segment.end - segment.start, 0.1)
     path = _resolve_media_path(segment.source)
+    is_auto_source = segment.source in {None, "", "auto"}
 
     clip = None
     if path:
@@ -198,6 +346,8 @@ def _segment_to_clip(
             clip = None
 
     if clip is None:
+        if not is_auto_source:
+            raise RuntimeError(f"Media source not found or unreadable: {segment.source}")
         clip = ColorClip(size=factory.canvas_size, color=fallback_color, duration=duration)
 
     clip = _resize_clip(clip, factory.canvas_size)
@@ -216,8 +366,48 @@ def _segment_to_clip(
 
     clip = _set_duration(clip, duration)
 
-    # Position handling (overlay clips support extras.position)
-    position = segment.extras.get("position") if isinstance(segment.extras, dict) else None
+    extras = segment.extras if isinstance(segment.extras, dict) else {}
+
+    position = extras.get("position")
+    position_end = extras.get("position_end")
+    is_image_segment = segment.media_type in {"image", "image_overlay"}
+    auto_motion_enabled = extras.get("auto_motion", True)
+    auto_mode = str(extras.get("auto_motion_mode", "kenburns") or "kenburns")
+    auto_strength = extras.get("auto_motion_strength", 0.08)
+    auto_base_scale = extras.get("auto_motion_base_scale", 1.08)
+    auto_shift = extras.get("auto_motion_shift", None)
+
+    def _as_float(value, default=None):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    scale_start = extras.get("scale_start")
+    scale_end = extras.get("scale_end")
+
+    manual_scale = scale_start is not None or scale_end is not None
+    manual_position = position is not None or position_end is not None
+
+    if (
+        is_image_segment
+        and auto_motion_enabled
+        and auto_mode.lower() not in {"none", "off"}
+        and not manual_scale
+        and not manual_position
+    ):
+        params = _auto_motion_parameters(
+            factory.canvas_size,
+            auto_mode,
+            _as_float(auto_base_scale, 1.08) or 1.08,
+            _as_float(auto_strength, 0.08) or 0.08,
+            _as_float(auto_shift, None),
+        )
+        position = params.get("position", position)
+        position_end = params.get("position_end", position_end)
+        scale_start = params.get("scale_start", scale_start)
+        scale_end = params.get("scale_end", scale_end)
+
     if position is not None:
         if isinstance(position, (list, tuple)):
             clip = _with_position(clip, tuple(position))
@@ -225,6 +415,76 @@ def _segment_to_clip(
             clip = _with_position(clip, position)
     elif _is_overlay(segment):
         clip = _with_position(clip, "center")
+
+    if (
+        position is not None
+        and position_end is not None
+        and isinstance(position, (list, tuple))
+        and isinstance(position_end, (list, tuple))
+    ):
+        start_pos = tuple(position)
+        end_pos = tuple(position_end)
+
+        def pos_func(t: float):
+            if duration <= 0:
+                return end_pos
+            ratio = max(0.0, min(t / duration, 1.0))
+            x = start_pos[0] + (end_pos[0] - start_pos[0]) * ratio
+            y = start_pos[1] + (end_pos[1] - start_pos[1]) * ratio
+            return (x, y)
+
+        clip = _with_position(clip, pos_func)
+
+    def _apply_scale_effect(target_clip, scale):
+        if hasattr(target_clip, "with_effects") and ResizeEffect is not None:
+            try:
+                return target_clip.with_effects([ResizeEffect(new_size=scale)])
+            except Exception:
+                pass
+        if hasattr(target_clip, "resize"):
+            try:
+                return target_clip.resize(scale)
+            except Exception:
+                pass
+        if hasattr(target_clip, "resized"):
+            try:
+                return target_clip.resized(new_size=scale)
+            except Exception:
+                pass
+        if vfx is not None and hasattr(target_clip, "fx") and hasattr(vfx, "resize"):
+            try:
+                return target_clip.fx(vfx.resize, scale)
+            except Exception:
+                pass
+        return target_clip
+
+    if scale_start is None:
+        scale_start = extras.get("scale_start")
+    if scale_end is None:
+        scale_end = extras.get("scale_end")
+    if scale_start is not None or scale_end is not None:
+        try:
+            start_scale = float(scale_start) if scale_start is not None else 1.0
+            end_scale = float(scale_end) if scale_end is not None else start_scale
+            if abs(end_scale - start_scale) < 1e-3:
+                clip = _apply_scale_effect(clip, start_scale)
+            else:
+                def scale_func(t: float):
+                    if duration <= 0:
+                        return end_scale
+                    ratio = max(0.0, min(t / duration, 1.0))
+                    return start_scale + (end_scale - start_scale) * ratio
+
+                clip = _apply_scale_effect(clip, scale_func)
+        except Exception:
+            pass
+
+    alpha = extras.get("alpha")
+    if alpha is not None:
+        try:
+            clip = _with_opacity(clip, float(alpha))
+        except (ValueError, TypeError):
+            pass
 
     return clip
 
@@ -261,53 +521,71 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
             fps_candidates.append(int(fps_hint))
     fps = fps_candidates[0] if fps_candidates else 24
 
-    factory = MediaFactory(ASSETS_DIR, fps=fps)
+    style = metadata.subtitle_style
+    factory = MediaFactory(
+        ASSETS_DIR,
+        fps=fps,
+        subtitle_font=style.font_path,
+        subtitle_fontsize=style.font_size,
+        subtitle_y_offset=style.y_offset,
+        subtitle_stroke_width=style.stroke_width,
+    )
+    if style.font_path != factory.subtitle_font:
+        style.font_path = factory.subtitle_font
 
     base_segments = [seg for seg in timeline_segments if not _is_overlay(seg)]
     overlay_segments = [seg for seg in timeline_segments if _is_overlay(seg)]
 
     clips: List[VideoFileClip] = []
     clip_pool: List[VideoFileClip] = []
-    cursor = 0.0
-    for segment in base_segments:
-        seg_duration = max(segment.end - segment.start, 0.0)
-        if seg_duration <= 0:
-            continue
-        if segment.start > cursor + 1e-3:
-            gap = segment.start - cursor
-            filler = _gap_clip(gap, factory, fps)
+    overlay_clips: List[VideoFileClip] = []
+    try:
+        cursor = 0.0
+        for segment in base_segments:
+            seg_duration = max(segment.end - segment.start, 0.0)
+            if seg_duration <= 0:
+                continue
+            if segment.start > cursor + 1e-3:
+                gap = segment.start - cursor
+                filler = _gap_clip(gap, factory, fps)
+                clips.append(filler)
+                clip_pool.append(filler)
+                cursor += gap
+
+            clip = _segment_to_clip(segment, factory, fps)
+            clips.append(clip)
+            clip_pool.append(clip)
+            cursor = max(cursor, segment.end)
+
+        if cursor < base_duration - 1e-3:
+            filler = _gap_clip(base_duration - cursor, factory, fps)
             clips.append(filler)
             clip_pool.append(filler)
-            cursor += gap
 
-        clip = _segment_to_clip(segment, factory, fps)
-        clips.append(clip)
-        clip_pool.append(clip)
-        cursor = max(cursor, segment.end)
+        if clips:
+            timeline_clip = concatenate_videoclips(clips, method="compose")
+        else:
+            timeline_clip = ColorClip(size=factory.canvas_size, color=(15, 15, 20), duration=base_duration)
+            timeline_clip = _set_fps(timeline_clip, fps)
 
-    if cursor < base_duration - 1e-3:
-        filler = _gap_clip(base_duration - cursor, factory, fps)
-        clips.append(filler)
-        clip_pool.append(filler)
+        timeline_clip = _set_duration(timeline_clip, base_duration)
 
-    if clips:
-        timeline_clip = concatenate_videoclips(clips, method="compose")
-    else:
-        timeline_clip = ColorClip(size=factory.canvas_size, color=(15, 15, 20), duration=base_duration)
-        timeline_clip = _set_fps(timeline_clip, fps)
-
-    timeline_clip = _set_duration(timeline_clip, base_duration)
-
-    overlay_clips: List[VideoFileClip] = []
-    for segment in overlay_segments:
-        seg_duration = max(segment.end - segment.start, 0.0)
-        if seg_duration <= 0:
-            continue
-        clip = _segment_to_clip(segment, factory, fps)
-        clip = _with_start(clip, segment.start)
-        clip = _with_end(clip, segment.end)
-        overlay_clips.append(clip)
-        clip_pool.append(clip)
+        for segment in overlay_segments:
+            seg_duration = max(segment.end - segment.start, 0.0)
+            if seg_duration <= 0:
+                continue
+            clip = _segment_to_clip(segment, factory, fps)
+            clip = _with_start(clip, segment.start)
+            clip = _with_end(clip, segment.end)
+            overlay_clips.append(clip)
+            clip_pool.append(clip)
+    except Exception:
+        for clip in clip_pool:
+            try:
+                clip.close()
+            except Exception:
+                pass
+        raise
 
     voice_path = metadata.audio_settings.voice_path or metadata.audio_path
     if not voice_path:
@@ -408,6 +686,7 @@ __all__ = [
     "delete_subtitle_line",
     "replace_timeline",
     "update_audio_settings",
+    "update_subtitle_style",
     "delete_project",
     "render_project",
     "restore_project_version",

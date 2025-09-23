@@ -139,6 +139,60 @@
                 <button type="button" onclick="addTimelineSegment()">세그먼트 추가</button>
                 <button type="button" class="danger" onclick="removeTimelineSegment()">선택 삭제</button>
             </div>
+            <div class="control-row extras">
+                <label>Pos X <input type="number" step="1" id="segment-pos-x"></label>
+                <label>Pos Y <input type="number" step="1" id="segment-pos-y"></label>
+                <label>End X <input type="number" step="1" id="segment-end-pos-x"></label>
+                <label>End Y <input type="number" step="1" id="segment-end-pos-y"></label>
+                <label>Scale 시작 <input type="number" step="0.05" min="0.1" id="segment-scale-start"></label>
+                <label>Scale 끝 <input type="number" step="0.05" min="0.1" id="segment-scale-end"></label>
+            </div>
+            <div class="control-row extras">
+                <label><input type="checkbox" id="segment-auto-enabled" checked> 자동 모션</label>
+                <label>모션 종류
+                    <select id="segment-auto-mode">
+                        <option value="">기본(Ken Burns)</option>
+                        <option value="kenburns">Ken Burns</option>
+                        <option value="zoom_in">Zoom In</option>
+                        <option value="zoom_out">Zoom Out</option>
+                        <option value="pan_left">Pan Left</option>
+                        <option value="pan_right">Pan Right</option>
+                        <option value="pan_up">Pan Up</option>
+                        <option value="pan_down">Pan Down</option>
+                        <option value="none">사용 안함</option>
+                    </select>
+                </label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.5" id="segment-auto-strength" placeholder="0.08"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="segment-auto-base" placeholder="1.08"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.35" id="segment-auto-shift" placeholder="자동"></label>
+            </div>
+            <div class="control-row extras">
+                <label>새 Pos X <input type="number" step="1" id="new-pos-x"></label>
+                <label>새 Pos Y <input type="number" step="1" id="new-pos-y"></label>
+                <label>새 End X <input type="number" step="1" id="new-end-pos-x"></label>
+                <label>새 End Y <input type="number" step="1" id="new-end-pos-y"></label>
+                <label>새 Scale 시작 <input type="number" step="0.05" min="0.1" id="new-scale-start"></label>
+                <label>새 Scale 끝 <input type="number" step="0.05" min="0.1" id="new-scale-end"></label>
+            </div>
+            <div class="control-row extras">
+                <label><input type="checkbox" id="new-auto-enabled" checked> 자동 모션</label>
+                <label>모션 종류
+                    <select id="new-auto-mode">
+                        <option value="">기본(Ken Burns)</option>
+                        <option value="kenburns">Ken Burns</option>
+                        <option value="zoom_in">Zoom In</option>
+                        <option value="zoom_out">Zoom Out</option>
+                        <option value="pan_left">Pan Left</option>
+                        <option value="pan_right">Pan Right</option>
+                        <option value="pan_up">Pan Up</option>
+                        <option value="pan_down">Pan Down</option>
+                        <option value="none">사용 안함</option>
+                    </select>
+                </label>
+                <label>강도 <input type="number" step="0.01" min="0" max="0.5" id="new-auto-strength" placeholder="0.08"></label>
+                <label>기본 스케일 <input type="number" step="0.01" min="1" id="new-auto-base" placeholder="1.08"></label>
+                <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.35" id="new-auto-shift" placeholder="자동"></label>
+            </div>
         </div>
 
         <div class="timeline-editor">
@@ -158,8 +212,8 @@
                 <tbody>
                 {% for sub in result.metadata.captions %}
                 <tr>
-                    <td><input type="number" step="0.1" value="{{ sub.start }}" data-sub-id="{{ sub.id }}" data-field="start"></td>
-                    <td><input type="number" step="0.1" value="{{ sub.end }}" data-sub-id="{{ sub.id }}" data-field="end"></td>
+                    <td><input type="number" step="0.1" value="{{ '%.1f'|format(sub.start) if sub.start is not none else '' }}" data-sub-id="{{ sub.id }}" data-field="start"></td>
+                    <td><input type="number" step="0.1" value="{{ '%.1f'|format(sub.end) if sub.end is not none else '' }}" data-sub-id="{{ sub.id }}" data-field="end"></td>
                     <td><textarea data-sub-id="{{ sub.id }}" data-field="text">{{ sub.text }}</textarea></td>
                     <td>
                         <button type="button" onclick="updateSubtitle('{{ result.metadata.base_name }}', '{{ sub.id }}')">저장</button>
@@ -185,6 +239,15 @@
             <label>덕킹 <input type="number" step="0.05" min="0" max="1" id="ducking" value="{{ result.metadata.audio_settings.ducking }}"></label>
             <label>배경음 경로 <input type="text" id="music-track" value="{{ result.metadata.audio_settings.music_track or '' }}" placeholder="assets/music/..."></label>
             <button type="button" onclick="updateAudio('{{ result.metadata.base_name }}')">오디오 저장</button>
+        </div>
+
+        <div class="subtitle-style">
+            <h3>자막 스타일</h3>
+            <label>폰트 크기 <input type="number" min="10" max="120" id="subtitle-font-size"></label>
+            <label>Y 오프셋 <input type="number" step="1" id="subtitle-y-offset"></label>
+            <label>외곽선 두께 <input type="number" min="0" max="10" id="subtitle-stroke-width"></label>
+            <label>폰트 경로 <input type="text" id="subtitle-font-path" placeholder="예: /usr/share/fonts/..." autocomplete="off"></label>
+            <button type="button" onclick="updateSubtitleStyle('{{ result.metadata.base_name }}')">자막 스타일 저장</button>
         </div>
 
         <div class="versions">
@@ -238,17 +301,23 @@ function ensureNumber(value, fallback = 0) {
     return Number.isFinite(num) ? num : fallback;
 }
 
+function roundToTenths(value) {
+    if (!Number.isFinite(value)) return Number.NaN;
+    return Math.round(value * 10) / 10;
+}
+
 function normalizeTimelineSegments() {
     timelineSegments = (timelineSegments || []).map((seg) => {
         const start = ensureNumber(seg.start, 0);
         const end = ensureNumber(seg.end, start + 0.1);
+        const extrasRaw = (seg.extras && typeof seg.extras === 'object') ? { ...seg.extras } : {};
         return {
             id: seg.id || generateSegmentId(),
             media_type: seg.media_type || 'broll',
             source: seg.source ?? 'auto',
             start,
             end: end <= start ? start + 0.1 : end,
-            extras: seg.extras || {},
+            extras: extrasRaw,
         };
     }).sort((a, b) => a.start - b.start);
     if (projectData) {
@@ -299,6 +368,16 @@ function clearSegmentForm() {
     });
     const typeSelect = document.getElementById('segment-type');
     if (typeSelect) typeSelect.value = 'broll';
+    ['segment-pos-x', 'segment-pos-y', 'segment-end-pos-x', 'segment-end-pos-y', 'segment-scale-start', 'segment-scale-end'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const autoEnabled = document.getElementById('segment-auto-enabled');
+    if (autoEnabled) autoEnabled.checked = true;
+    ['segment-auto-mode', 'segment-auto-strength', 'segment-auto-base', 'segment-auto-shift'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
 }
 
 function setSegmentForm(segment) {
@@ -307,6 +386,22 @@ function setSegmentForm(segment) {
     document.getElementById('segment-end').value = segment.end ?? segment.start + 0.1;
     document.getElementById('segment-source').value = segment.source || 'auto';
     document.getElementById('segment-type').value = segment.media_type || 'broll';
+    const extras = segment.extras || {};
+    const pos = Array.isArray(extras.position) ? extras.position : null;
+    document.getElementById('segment-pos-x').value = pos ? pos[0] : '';
+    document.getElementById('segment-pos-y').value = pos ? pos[1] : '';
+    const endPos = Array.isArray(extras.position_end) ? extras.position_end : null;
+    document.getElementById('segment-end-pos-x').value = endPos ? endPos[0] : '';
+    document.getElementById('segment-end-pos-y').value = endPos ? endPos[1] : '';
+    document.getElementById('segment-scale-start').value = extras.scale_start ?? '';
+    document.getElementById('segment-scale-end').value = extras.scale_end ?? '';
+    const autoEnabledInput = document.getElementById('segment-auto-enabled');
+    if (autoEnabledInput) autoEnabledInput.checked = extras.auto_motion !== False;
+    const autoModeSelect = document.getElementById('segment-auto-mode');
+    if (autoModeSelect) autoModeSelect.value = extras.auto_motion_mode ?? '';
+    document.getElementById('segment-auto-strength').value = extras.auto_motion_strength ?? '';
+    document.getElementById('segment-auto-base').value = extras.auto_motion_base_scale ?? '';
+    document.getElementById('segment-auto-shift').value = extras.auto_motion_shift ?? '';
 }
 
 function selectTimelineSegment(index, options = {}) {
@@ -332,11 +427,73 @@ function applyTimelineEdit(baseName) {
     const start = ensureNumber(document.getElementById('segment-start').value, segment.start);
     const end = ensureNumber(document.getElementById('segment-end').value, segment.end);
     segment.id = document.getElementById('segment-id').value || segment.id || generateSegmentId();
-    segment.start = start;
-    segment.end = end <= start ? start + 0.1 : end;
+   segment.start = start;
+   segment.end = end <= start ? start + 0.1 : end;
     segment.source = document.getElementById('segment-source').value || 'auto';
     segment.media_type = document.getElementById('segment-type').value || 'broll';
     segment.extras = segment.extras || {};
+    const extras = segment.extras;
+
+    const autoEnabledEl = document.getElementById('segment-auto-enabled');
+    const autoEnabled = autoEnabledEl ? autoEnabledEl.checked : true;
+    if (!autoEnabled) {
+        extras.auto_motion = false;
+    } else {
+        delete extras.auto_motion;
+    }
+    const autoModeVal = document.getElementById('segment-auto-mode').value;
+    if (autoModeVal) {
+        extras.auto_motion_mode = autoModeVal;
+    } else {
+        delete extras.auto_motion_mode;
+    }
+    const autoStrengthVal = parseFloat(document.getElementById('segment-auto-strength').value);
+    if (!Number.isNaN(autoStrengthVal)) {
+        extras.auto_motion_strength = autoStrengthVal;
+    } else {
+        delete extras.auto_motion_strength;
+    }
+    const autoBaseVal = parseFloat(document.getElementById('segment-auto-base').value);
+    if (!Number.isNaN(autoBaseVal)) {
+        extras.auto_motion_base_scale = autoBaseVal;
+    } else {
+        delete extras.auto_motion_base_scale;
+    }
+    const autoShiftVal = parseFloat(document.getElementById('segment-auto-shift').value);
+    if (!Number.isNaN(autoShiftVal)) {
+        extras.auto_motion_shift = autoShiftVal;
+    } else {
+        delete extras.auto_motion_shift;
+    }
+
+    const posX = parseFloat(document.getElementById('segment-pos-x').value);
+    const posY = parseFloat(document.getElementById('segment-pos-y').value);
+    if (!Number.isNaN(posX) && !Number.isNaN(posY)) {
+        extras.position = [posX, posY];
+    } else {
+        delete extras.position;
+    }
+
+    const endPosX = parseFloat(document.getElementById('segment-end-pos-x').value);
+    const endPosY = parseFloat(document.getElementById('segment-end-pos-y').value);
+    if (!Number.isNaN(endPosX) && !Number.isNaN(endPosY)) {
+        extras.position_end = [endPosX, endPosY];
+    } else {
+        delete extras.position_end;
+    }
+
+    const scaleStartVal = parseFloat(document.getElementById('segment-scale-start').value);
+    const scaleEndVal = parseFloat(document.getElementById('segment-scale-end').value);
+    if (!Number.isNaN(scaleStartVal)) {
+        extras.scale_start = scaleStartVal;
+    } else {
+        delete extras.scale_start;
+    }
+    if (!Number.isNaN(scaleEndVal)) {
+        extras.scale_end = scaleEndVal;
+    } else {
+        delete extras.scale_end;
+    }
 
     timelineSegments.sort((a, b) => a.start - b.start);
     selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === segment.id);
@@ -350,6 +507,18 @@ function addTimelineSegment() {
     const end = ensureNumber(document.getElementById('new-segment-end').value, start + 0.1);
     const source = document.getElementById('new-segment-source').value || 'auto';
     const mediaType = document.getElementById('new-segment-type').value || 'broll';
+    const posX = parseFloat(document.getElementById('new-pos-x').value);
+    const posY = parseFloat(document.getElementById('new-pos-y').value);
+    const endPosX = parseFloat(document.getElementById('new-end-pos-x').value);
+    const endPosY = parseFloat(document.getElementById('new-end-pos-y').value);
+    const scaleStartVal = parseFloat(document.getElementById('new-scale-start').value);
+    const scaleEndVal = parseFloat(document.getElementById('new-scale-end').value);
+    const newAutoEnabledEl = document.getElementById('new-auto-enabled');
+    const newAutoEnabled = newAutoEnabledEl ? newAutoEnabledEl.checked : true;
+    const newAutoMode = document.getElementById('new-auto-mode').value;
+    const newAutoStrength = parseFloat(document.getElementById('new-auto-strength').value);
+    const newAutoBase = parseFloat(document.getElementById('new-auto-base').value);
+    const newAutoShift = parseFloat(document.getElementById('new-auto-shift').value);
 
     const newSegment = {
         id: generateSegmentId(),
@@ -359,6 +528,33 @@ function addTimelineSegment() {
         end: end <= start ? start + 0.1 : end,
         extras: {},
     };
+    if (!newAutoEnabled) {
+        newSegment.extras.auto_motion = false;
+    }
+    if (newAutoMode) {
+        newSegment.extras.auto_motion_mode = newAutoMode;
+    }
+    if (!Number.isNaN(newAutoStrength)) {
+        newSegment.extras.auto_motion_strength = newAutoStrength;
+    }
+    if (!Number.isNaN(newAutoBase)) {
+        newSegment.extras.auto_motion_base_scale = newAutoBase;
+    }
+    if (!Number.isNaN(newAutoShift)) {
+        newSegment.extras.auto_motion_shift = newAutoShift;
+    }
+    if (!Number.isNaN(posX) && !Number.isNaN(posY)) {
+        newSegment.extras.position = [posX, posY];
+    }
+    if (!Number.isNaN(endPosX) && !Number.isNaN(endPosY)) {
+        newSegment.extras.position_end = [endPosX, endPosY];
+    }
+    if (!Number.isNaN(scaleStartVal)) {
+        newSegment.extras.scale_start = scaleStartVal;
+    }
+    if (!Number.isNaN(scaleEndVal)) {
+        newSegment.extras.scale_end = scaleEndVal;
+    }
     timelineSegments.push(newSegment);
     timelineSegments.sort((a, b) => a.start - b.start);
     selectedSegmentIndex = timelineSegments.findIndex((seg) => seg.id === newSegment.id);
@@ -369,6 +565,16 @@ function addTimelineSegment() {
     document.getElementById('new-segment-end').value = '';
     document.getElementById('new-segment-source').value = '';
     document.getElementById('new-segment-type').value = 'broll';
+    ['new-pos-x', 'new-pos-y', 'new-end-pos-x', 'new-end-pos-y', 'new-scale-start', 'new-scale-end'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const newAutoEnabledInput = document.getElementById('new-auto-enabled');
+    if (newAutoEnabledInput) newAutoEnabledInput.checked = true;
+    ['new-auto-mode', 'new-auto-strength', 'new-auto-base', 'new-auto-shift'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
     showMessage('세그먼트가 추가되었습니다. 저장 버튼을 눌러 반영하세요.', 'success');
 }
 
@@ -421,9 +627,18 @@ async function updateSubtitle(baseName, subtitleId) {
     const textInput = document.querySelector(`[data-sub-id="${subtitleId}"][data-field="text"]`);
     if (!startInput || !endInput || !textInput) return;
 
+    const startValue = roundToTenths(parseFloat(startInput.value));
+    const endValue = roundToTenths(parseFloat(endInput.value));
+    if (Number.isNaN(startValue) || Number.isNaN(endValue)) {
+        showMessage('start/end 값을 확인해주세요. 예: 12.3', 'error');
+        return;
+    }
+    startInput.value = startValue.toFixed(1);
+    endInput.value = endValue.toFixed(1);
+
     const payload = {
-        start: parseFloat(startInput.value),
-        end: parseFloat(endInput.value),
+        start: startValue,
+        end: endValue,
         text: textInput.value
     };
 
@@ -454,13 +669,15 @@ async function deleteSubtitle(baseName, subtitleId) {
 }
 
 async function createSubtitle(baseName) {
-    const start = parseFloat(document.getElementById('new-start').value);
-    const end = parseFloat(document.getElementById('new-end').value);
+    const start = roundToTenths(parseFloat(document.getElementById('new-start').value));
+    const end = roundToTenths(parseFloat(document.getElementById('new-end').value));
     const text = document.getElementById('new-text').value;
     if (Number.isNaN(start) || Number.isNaN(end) || !text) {
         showMessage('start, end, text를 모두 입력해주세요.', 'error');
         return;
     }
+    document.getElementById('new-start').value = start.toFixed(1);
+    document.getElementById('new-end').value = end.toFixed(1);
     const res = await fetch(`/api/projects/${baseName}/subtitles`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -497,6 +714,38 @@ async function updateAudio(baseName) {
     } else {
         const data = await res.json();
         showMessage(data.detail || '오디오 저장 실패', 'error');
+    }
+}
+
+async function updateSubtitleStyle(baseName) {
+    const fontSize = parseInt(document.getElementById('subtitle-font-size').value, 10);
+    const yOffset = parseInt(document.getElementById('subtitle-y-offset').value, 10);
+    const strokeWidth = parseInt(document.getElementById('subtitle-stroke-width').value, 10);
+    const fontPathInput = document.getElementById('subtitle-font-path');
+
+    const payload = {};
+    if (!Number.isNaN(fontSize)) payload.font_size = fontSize;
+    if (!Number.isNaN(yOffset)) payload.y_offset = yOffset;
+    if (!Number.isNaN(strokeWidth)) payload.stroke_width = strokeWidth;
+    if (fontPathInput) {
+        const currentValue = fontPathInput.value.trim();
+        const initialValue = fontPathInput.dataset.initial ?? '';
+        if (currentValue !== initialValue) {
+            payload.font_path = currentValue || null;
+        }
+    }
+
+    const res = await fetch(`/api/projects/${baseName}/subtitle-style`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+        showMessage('자막 스타일이 저장되었습니다.', 'success');
+        setTimeout(() => window.location.reload(), 600);
+    } else {
+        const data = await res.json();
+        showMessage(data.detail || '자막 스타일 저장 실패', 'error');
     }
 }
 
@@ -646,11 +895,36 @@ window.addEventListener('DOMContentLoaded', () => {
         } else {
             clearSegmentForm();
         }
+        const style = projectData.subtitle_style || {};
+        const fontSizeInput = document.getElementById('subtitle-font-size');
+        const yOffsetInput = document.getElementById('subtitle-y-offset');
+        const strokeWidthInput = document.getElementById('subtitle-stroke-width');
+        const fontPathInput = document.getElementById('subtitle-font-path');
+        if (fontSizeInput) fontSizeInput.value = style.font_size ?? 62;
+        if (yOffsetInput) yOffsetInput.value = style.y_offset ?? 0;
+        if (strokeWidthInput) strokeWidthInput.value = style.stroke_width ?? 2;
+        if (fontPathInput) {
+            const currentFontPath = style.font_path ?? '';
+            fontPathInput.value = currentFontPath;
+            fontPathInput.dataset.initial = currentFontPath;
+        }
         addInitialVersionList();
         refreshVersionHistory(projectData.base_name);
         initWaveform();
     } else {
         renderVersionList([]);
+        ['subtitle-font-size', 'subtitle-y-offset', 'subtitle-stroke-width'].forEach((id, idx) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (idx === 0) el.value = 62;
+            if (idx === 1) el.value = 0;
+            if (idx === 2) el.value = 2;
+        });
+        const fontPathInput = document.getElementById('subtitle-font-path');
+        if (fontPathInput) {
+            fontPathInput.value = '';
+            fontPathInput.dataset.initial = '';
+        }
     }
 });
 </script>

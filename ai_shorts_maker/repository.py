@@ -94,6 +94,9 @@ def load_project(base_name: str, output_dir: Optional[Path] = None) -> ProjectMe
     if "version" not in data:
         data["version"] = 1
 
+    if "subtitle_style" not in data or not isinstance(data["subtitle_style"], dict):
+        data["subtitle_style"] = {}
+
     if "duration" not in data:
         captions = data.get("captions") or []
         if captions:

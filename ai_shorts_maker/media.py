@@ -1,7 +1,10 @@
 """Media helpers for assembling the short video."""
 from __future__ import annotations
 
+import inspect
 import logging
+import math
+import os
 import random
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -58,8 +61,99 @@ from .subtitles import CaptionLine
 
 logger = logging.getLogger(__name__)
 
+_TEXTCLIP_SIGNATURE = inspect.signature(TextClip.__init__)
+_TEXT_PARAM = "text" if "text" in _TEXTCLIP_SIGNATURE.parameters else "txt"
+_FONT_SIZE_PARAM = "font_size" if "font_size" in _TEXTCLIP_SIGNATURE.parameters else "fontsize"
+
 SUPPORTED_BROLL_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
 SUPPORTED_MUSIC_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac"}
+
+DEFAULT_FONT_CANDIDATES = [
+    os.getenv("SHORTS_SUBTITLE_FONT"),
+    "/usr/share/fonts/truetype/nanum/NanumSquareRoundR.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumSquareR.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+
+FONT_SEARCH_DIRS = [
+    Path(path).expanduser()
+    for path in filter(
+        None,
+        [
+            os.getenv("SHORTS_FONT_DIR"),
+            "/usr/share/fonts/truetype/nanum",
+            "/usr/share/fonts/opentype/noto",
+            "/usr/share/fonts/truetype",
+            "/usr/local/share/fonts",
+            str(Path.home() / ".fonts"),
+            str(Path.home() / ".local/share/fonts"),
+        ],
+    )
+]
+
+FONT_FILE_CANDIDATES = [
+    "NanumSquareRoundR.ttf",
+    "NanumSquareR.ttf",
+    "NanumGothic.ttf",
+    "NanumBarunGothic.ttf",
+    "NanumBarunGothicLight.ttf",
+    "NotoSansCJK-Regular.ttc",
+    "NotoSansKR-Regular.otf",
+    "NotoSansKR-Regular.ttc",
+]
+
+
+def _detect_font() -> Optional[str]:
+    for candidate in DEFAULT_FONT_CANDIDATES:
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if path.exists():
+            logger.debug("Using subtitle font candidate %s", path)
+            return str(path)
+
+    for directory in FONT_SEARCH_DIRS:
+        if not directory or not directory.exists():
+            continue
+        for filename in FONT_FILE_CANDIDATES:
+            candidate = directory / filename
+            if candidate.exists():
+                logger.debug("Detected subtitle font %s", candidate)
+                return str(candidate)
+        for pattern in ("Nanum*.ttf", "Nanum*.otf", "NotoSansCJK-*.ttc", "NotoSansKR*.otf", "NotoSansKR*.ttc"):
+            try:
+                match = next(directory.rglob(pattern))
+            except (StopIteration, PermissionError, OSError):
+                continue
+            logger.debug("Detected subtitle font via pattern %s -> %s", pattern, match)
+            return str(match)
+    logger.warning("No subtitle font found; MoviePy default will be used")
+    return None
+
+
+def _resolve_font_path(font_path: Optional[str]) -> Optional[str]:
+    if font_path:
+        candidate = Path(font_path).expanduser()
+        if candidate.exists():
+            return str(candidate)
+        logger.warning("Subtitle font '%s' not found; falling back to auto-detection", font_path)
+    return _detect_font()
+
+
+def _with_position(clip, position):
+    if position is None:
+        return clip
+    if hasattr(clip, "with_position"):
+        return clip.with_position(position)
+    if hasattr(clip, "set_position"):
+        return clip.set_position(position)
+    clip.pos = position
+    return clip
 
 
 def _audio_loop(clip, duration: float):
@@ -94,14 +188,74 @@ def _video_loop(clip, duration: float):
     return clip
 
 
-def _resize_clip(clip, size: tuple[int, int]):
-    if hasattr(clip, "resized"):
-        return clip.resized(new_size=size)
-    if hasattr(clip, "resize"):
-        return clip.resize(size)
+def _clip_dimensions(clip) -> tuple[Optional[float], Optional[float]]:
+    width = getattr(clip, "w", None)
+    height = getattr(clip, "h", None)
+    if width is not None and height is not None:
+        return float(width), float(height)
+    size = getattr(clip, "size", None)
+    if isinstance(size, (list, tuple)) and len(size) == 2:
+        width, height = size
+        if width and height:
+            return float(width), float(height)
+    return None, None
+
+
+def _resize_to_size(clip, size: tuple[int, int]):
     if hasattr(clip, "with_effects") and ResizeEffect is not None:
-        return clip.with_effects([ResizeEffect(new_size=size)])
+        try:
+            return clip.with_effects([ResizeEffect(new_size=size)])
+        except Exception:
+            pass
+    if hasattr(clip, "resized"):
+        try:
+            return clip.resized(new_size=size)
+        except Exception:
+            pass
+    if hasattr(clip, "resize"):
+        try:
+            return clip.resize(size)
+        except Exception:
+            pass
     return clip
+
+
+def _crop_to_size(clip, size: tuple[int, int]):
+    target_w, target_h = size
+    clip_w, clip_h = _clip_dimensions(clip)
+    if clip_w is None or clip_h is None:
+        return clip
+    if abs(clip_w - target_w) < 1 and abs(clip_h - target_h) < 1:
+        return clip
+    x_center = clip_w / 2
+    y_center = clip_h / 2
+    if hasattr(clip, "crop"):
+        try:
+            return clip.crop(width=target_w, height=target_h, x_center=x_center, y_center=y_center)
+        except Exception:
+            pass
+    if vfx is not None and hasattr(clip, "fx") and hasattr(vfx, "crop"):
+        try:
+            return clip.fx(vfx.crop, width=target_w, height=target_h, x_center=x_center, y_center=y_center)
+        except Exception:
+            pass
+    return _resize_to_size(clip, size)
+
+
+def _resize_clip(clip, size: tuple[int, int]):
+    target_w, target_h = size
+    clip_w, clip_h = _clip_dimensions(clip)
+    if clip_w is None or clip_h is None or clip_w <= 0 or clip_h <= 0:
+        return _resize_to_size(clip, size)
+
+    scale = max(target_w / clip_w, target_h / clip_h)
+    # ensure a small padding to avoid rounding gaps when cropping later
+    scale = max(scale, 1.0)
+    new_w = max(1, int(math.ceil(clip_w * scale)))
+    new_h = max(1, int(math.ceil(clip_h * scale)))
+
+    resized = _resize_to_size(clip, (new_w, new_h))
+    return _crop_to_size(resized, size)
 
 
 def _set_fps(clip, fps: int):
@@ -160,12 +314,20 @@ class MediaFactory:
         assets_dir: Path,
         canvas_size: tuple[int, int] = (1080, 1920),
         fps: int = 24,
+        subtitle_font: Optional[str] = None,
+        subtitle_fontsize: int = 62,
+        subtitle_y_offset: int = 0,
+        subtitle_stroke_width: int = 2,
     ) -> None:
         self.assets_dir = assets_dir
         self.broll_dir = assets_dir / "broll"
         self.music_dir = assets_dir / "music"
         self.canvas_size = canvas_size
         self.fps = fps
+        self.subtitle_font = _resolve_font_path(subtitle_font)
+        self.subtitle_fontsize = subtitle_fontsize
+        self.subtitle_y_offset = subtitle_y_offset
+        self.subtitle_stroke_width = subtitle_stroke_width
 
     # -------------------- B-roll --------------------
     def build_broll_clip(self, duration: float):
@@ -289,20 +451,31 @@ class MediaFactory:
             return video_clip
 
         def generator(txt):
-            return TextClip(
-                txt,
-                fontsize=62,
-                font="Arial",
+            base_kwargs = dict(
                 color="white",
                 method="caption",
                 size=(self.canvas_size[0] - 120, None),
                 stroke_color="black",
-                stroke_width=2,
+                stroke_width=self.subtitle_stroke_width,
             )
 
+            def _make_kwargs(include_font: bool):
+                kwargs = dict(base_kwargs)
+                kwargs[_TEXT_PARAM] = txt
+                kwargs[_FONT_SIZE_PARAM] = self.subtitle_fontsize
+                if include_font and self.subtitle_font:
+                    kwargs["font"] = self.subtitle_font
+                return kwargs
+
+            try:
+                return TextClip(**_make_kwargs(include_font=True))
+            except Exception:  # fallback when font fails or incompatible args
+                return TextClip(**_make_kwargs(include_font=False))
+
         subs = [((cap.start, cap.end), cap.text) for cap in captions]
-        subtitles_clip = SubtitlesClip(subs, generator)
-        subtitles_clip = subtitles_clip.set_position(("center", self.canvas_size[1] - 250))
+        subtitles_clip = SubtitlesClip(subs, make_textclip=generator)
+        base_y = self.canvas_size[1] - 250 - self.subtitle_y_offset
+        subtitles_clip = _with_position(subtitles_clip, ("center", base_y))
         video_duration = getattr(video_clip, "duration", None)
         if video_duration is not None:
             subtitles_clip = _set_duration(subtitles_clip, video_duration)

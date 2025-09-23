@@ -61,6 +61,13 @@ class AudioSettings(BaseModel):
     music_track: Optional[str] = None
 
 
+class SubtitleStyle(BaseModel):
+    font_size: int = Field(default=62, ge=10, le=120)
+    y_offset: int = Field(default=0)
+    stroke_width: int = Field(default=2, ge=0, le=10)
+    font_path: Optional[str] = None
+
+
 class ProjectMetadata(BaseModel):
     base_name: str
     topic: str
@@ -77,6 +84,7 @@ class ProjectMetadata(BaseModel):
     captions: List[SubtitleLine]
     timeline: List[TimelineSegment]
     audio_settings: AudioSettings
+    subtitle_style: SubtitleStyle = Field(default_factory=SubtitleStyle)
 
     version: int = 1
     created_at: datetime = Field(default_factory=datetime.utcnow)

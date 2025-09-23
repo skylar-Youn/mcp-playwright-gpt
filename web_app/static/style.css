@@ -230,6 +230,14 @@ summary {
 .control-row.secondary {
     margin-top: 8px;
 }
+.control-row.extras {
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 6px;
+}
+.control-row.extras label {
+    min-width: 130px;
+}
 
 .timeline-editor textarea {
     width: 100%;
@@ -279,6 +287,20 @@ summary {
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+.subtitle-style {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.subtitle-style label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.subtitle-style input {
+    width: 120px;
 }
 
 #version-list {

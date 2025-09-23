@@ -15,7 +15,7 @@ try:
 except ModuleNotFoundError:  # moviepy>=2.0 removes the editor module
     from moviepy import AudioFileClip
 
-from .models import AudioSettings, ProjectMetadata, TimelineSegment
+from .models import AudioSettings, ProjectMetadata, SubtitleStyle, TimelineSegment
 from .media import MediaFactory
 from .openai_client import OpenAIShortsClient
 from .prompts import build_script_prompt
@@ -131,7 +131,16 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
     write_srt_from_subtitles(subtitle_lines, srt_path)
     logger.info("Saved subtitles to %s", srt_path)
 
-    media_factory = MediaFactory(options.assets_dir, fps=options.fps)
+    subtitle_style = SubtitleStyle()
+    media_factory = MediaFactory(
+        options.assets_dir,
+        fps=options.fps,
+        subtitle_font=subtitle_style.font_path,
+        subtitle_fontsize=subtitle_style.font_size,
+        subtitle_y_offset=subtitle_style.y_offset,
+        subtitle_stroke_width=subtitle_style.stroke_width,
+    )
+    subtitle_style.font_path = media_factory.subtitle_font
     logger.info("Building background visuals (duration %.2fs)...", voice_duration)
     background_clip = media_factory.build_broll_clip(voice_duration)
 
@@ -193,6 +202,7 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
             voice_path=str(narration_path),
             music_track=str(selected_music) if selected_music else None,
         ),
+        subtitle_style=subtitle_style,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
         extra={"script_model": options.script_model, "tts_model": options.tts_model},

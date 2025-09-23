@@ -38,12 +38,20 @@ from ai_shorts_maker.services import (
     replace_timeline,
     restore_project_version,
     update_audio_settings,
+    update_subtitle_style,
     update_subtitle,
 )
 
 
 class RenderRequest(BaseModel):
     burn_subs: Optional[bool] = False
+
+
+class SubtitleStyleRequest(BaseModel):
+    font_size: Optional[int] = None
+    y_offset: Optional[int] = None
+    stroke_width: Optional[int] = None
+    font_path: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +96,8 @@ def api_add_subtitle(base_name: str, payload: SubtitleCreate) -> ProjectMetadata
         return add_subtitle(base_name, payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @api_router.patch("/projects/{base_name}/subtitles/{subtitle_id}", response_model=ProjectMetadata)
@@ -98,6 +108,8 @@ def api_update_subtitle(base_name: str, subtitle_id: str, payload: SubtitleUpdat
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @api_router.delete("/projects/{base_name}/subtitles/{subtitle_id}", response_model=ProjectMetadata)
@@ -156,6 +168,15 @@ def api_render_project(base_name: str, payload: Optional[RenderRequest] = Body(N
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@api_router.patch("/projects/{base_name}/subtitle-style", response_model=ProjectMetadata)
+def api_update_subtitle_style_route(base_name: str, payload: SubtitleStyleRequest) -> ProjectMetadata:
+    try:
+        data = payload.model_dump(exclude_unset=True)
+        return update_subtitle_style(base_name, **data)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @api_router.get("/projects/{base_name}/versions", response_model=List[ProjectVersionInfo])
