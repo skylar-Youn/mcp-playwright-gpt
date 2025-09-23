@@ -66,6 +66,7 @@ class SubtitleStyle(BaseModel):
     y_offset: int = Field(default=0)
     stroke_width: int = Field(default=2, ge=0, le=10)
     font_path: Optional[str] = None
+    animation: str = Field(default="none")
 
 
 class ProjectMetadata(BaseModel):

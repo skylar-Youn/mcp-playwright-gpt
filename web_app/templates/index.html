@@ -25,7 +25,11 @@
                 <label for="duration">길이(초)</label>
                 <input type="number" id="duration" name="duration" min="10" max="180" value="{{ form_values.duration }}">
                 <label for="lang">언어</label>
-                <input type="text" id="lang" name="lang" value="{{ form_values.lang }}">
+                <select id="lang" name="lang">
+                    {% for value, label in lang_options %}
+                    <option value="{{ value }}" {% if form_values.lang == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
                 <label for="fps">FPS</label>
                 <input type="number" id="fps" name="fps" min="12" max="60" value="{{ form_values.fps }}">
             </div>
@@ -247,10 +251,23 @@
 
         <div class="subtitle-style">
             <h3>자막 스타일</h3>
-            <label>폰트 크기 <input type="number" min="10" max="120" id="subtitle-font-size"></label>
-            <label>Y 오프셋 <input type="number" step="1" id="subtitle-y-offset"></label>
-            <label>외곽선 두께 <input type="number" min="0" max="10" id="subtitle-stroke-width"></label>
+            <label>폰트 크기 <input type="number" min="10" max="120" id="subtitle-font-size" placeholder="62"></label>
+            <label>Y 오프셋 <input type="number" step="1" id="subtitle-y-offset" placeholder="0"></label>
+            <label>외곽선 두께 <input type="number" min="0" max="10" id="subtitle-stroke-width" placeholder="2"></label>
             <label>폰트 경로 <input type="text" id="subtitle-font-path" placeholder="예: /usr/share/fonts/..." autocomplete="off"></label>
+            <label>애니메이션
+                <select id="subtitle-animation">
+                    <option value="none">없음</option>
+                    <option value="bounce">바운스</option>
+                    <option value="typewriter">타이핑</option>
+                    <option value="highlight">하이라이트 박스</option>
+                    <option value="fire">불꽃 텍스트</option>
+                    <option value="slide_up">슬라이드 업</option>
+                    <option value="slide_down">슬라이드 다운</option>
+                    <option value="slide_left">슬라이드 좌방향</option>
+                    <option value="slide_right">슬라이드 우방향</option>
+                </select>
+            </label>
             <button type="button" onclick="updateSubtitleStyle('{{ result.metadata.base_name }}')">자막 스타일 저장</button>
         </div>
 
@@ -748,6 +765,7 @@ async function updateSubtitleStyle(baseName) {
     const yOffset = parseInt(document.getElementById('subtitle-y-offset').value, 10);
     const strokeWidth = parseInt(document.getElementById('subtitle-stroke-width').value, 10);
     const fontPathInput = document.getElementById('subtitle-font-path');
+    const animationSelect = document.getElementById('subtitle-animation');
 
     const payload = {};
     if (!Number.isNaN(fontSize)) payload.font_size = fontSize;
@@ -758,6 +776,13 @@ async function updateSubtitleStyle(baseName) {
         const initialValue = fontPathInput.dataset.initial ?? '';
         if (currentValue !== initialValue) {
             payload.font_path = currentValue || null;
+        }
+    }
+    if (animationSelect) {
+        const currentAnimation = (animationSelect.value || 'none');
+        const initialAnimation = animationSelect.dataset.initial ?? 'none';
+        if (currentAnimation !== initialAnimation) {
+            payload.animation = currentAnimation;
         }
     }
 
@@ -927,6 +952,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const yOffsetInput = document.getElementById('subtitle-y-offset');
         const strokeWidthInput = document.getElementById('subtitle-stroke-width');
         const fontPathInput = document.getElementById('subtitle-font-path');
+        const animationSelect = document.getElementById('subtitle-animation');
         if (fontSizeInput) fontSizeInput.value = style.font_size ?? 62;
         if (yOffsetInput) yOffsetInput.value = style.y_offset ?? 0;
         if (strokeWidthInput) strokeWidthInput.value = style.stroke_width ?? 2;
@@ -934,6 +960,11 @@ window.addEventListener('DOMContentLoaded', () => {
             const currentFontPath = style.font_path ?? '';
             fontPathInput.value = currentFontPath;
             fontPathInput.dataset.initial = currentFontPath;
+        }
+        if (animationSelect) {
+            const animationValue = style.animation ?? 'none';
+            animationSelect.value = animationValue;
+            animationSelect.dataset.initial = animationValue;
         }
         addInitialVersionList();
         refreshVersionHistory(projectData.base_name);
@@ -949,6 +980,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if (fontPathInput) {
             fontPathInput.value = '';
             fontPathInput.dataset.initial = '';
+        }
+        const animationSelect = document.getElementById('subtitle-animation');
+        if (animationSelect) {
+            animationSelect.value = 'none';
+            animationSelect.dataset.initial = 'none';
         }
         setAutoControls('segment', {}, true);
         setAutoControls('new', {}, true);

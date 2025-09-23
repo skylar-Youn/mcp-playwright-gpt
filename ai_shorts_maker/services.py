@@ -201,6 +201,7 @@ def update_subtitle_style(
     y_offset: Optional[int] = None,
     stroke_width: Optional[int] = None,
     font_path: Optional[str] | object = UNSET,
+    animation: Optional[str] = None,
 ) -> ProjectMetadata:
     metadata = load_project(base_name)
     style = metadata.subtitle_style
@@ -212,6 +213,8 @@ def update_subtitle_style(
         style.stroke_width = stroke_width
     if font_path is not UNSET:
         style.font_path = (font_path or None)
+    if animation is not None:
+        style.animation = animation
     _touch(metadata)
     return save_project(metadata)
 
@@ -399,6 +402,10 @@ def _segment_to_clip(
 
     position = extras.get("position")
     position_end = extras.get("position_end")
+    if isinstance(position, list):
+        position = tuple(position)
+    if isinstance(position_end, list):
+        position_end = tuple(position_end)
     is_image_segment = segment.media_type in {"image", "image_overlay"}
     auto_motion_enabled = extras.get("auto_motion", True)
     auto_mode = str(extras.get("auto_motion_mode", "kenburns") or "kenburns")
@@ -628,6 +635,7 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
         subtitle_fontsize=style.font_size,
         subtitle_y_offset=style.y_offset,
         subtitle_stroke_width=style.stroke_width,
+        subtitle_animation=style.animation,
     )
     if style.font_path != factory.subtitle_font:
         style.font_path = factory.subtitle_font

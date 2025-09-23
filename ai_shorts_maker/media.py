@@ -9,6 +9,8 @@ import random
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+import numpy as np
+
 try:
     from moviepy.audio.fx import all as afx
 except ImportError:  # moviepy>=2.0 renamed audio effects
@@ -27,6 +29,7 @@ try:
         CompositeVideoClip,
         ImageClip,
         TextClip,
+        VideoClip,
         VideoFileClip,
         concatenate_videoclips,
     )
@@ -38,6 +41,7 @@ except ModuleNotFoundError:  # moviepy>=2.0 removes the editor shim
         CompositeVideoClip,
         ImageClip,
         TextClip,
+        VideoClip,
         VideoFileClip,
         concatenate_videoclips,
     )
@@ -318,6 +322,7 @@ class MediaFactory:
         subtitle_fontsize: int = 62,
         subtitle_y_offset: int = 0,
         subtitle_stroke_width: int = 2,
+        subtitle_animation: str = "none",
     ) -> None:
         self.assets_dir = assets_dir
         self.broll_dir = assets_dir / "broll"
@@ -328,6 +333,7 @@ class MediaFactory:
         self.subtitle_fontsize = subtitle_fontsize
         self.subtitle_y_offset = subtitle_y_offset
         self.subtitle_stroke_width = subtitle_stroke_width
+        self.subtitle_animation = (subtitle_animation or "none").lower()
 
     # -------------------- B-roll --------------------
     def build_broll_clip(self, duration: float):
@@ -450,7 +456,21 @@ class MediaFactory:
         if not captions:
             return video_clip
 
-        def generator(txt):
+        animation_mode = self.subtitle_animation
+        durations = [max(cap.end - cap.start, 0.1) for cap in captions]
+        duration_index = 0
+        base_y = self.canvas_size[1] - 250 - self.subtitle_y_offset
+        slide_modes = {"slide_up", "slide_down", "slide_left", "slide_right"}
+
+        def _next_duration() -> float:
+            nonlocal duration_index
+            if duration_index < len(durations):
+                value = durations[duration_index]
+                duration_index += 1
+                return value
+            return durations[-1] if durations else 1.5
+
+        def _create_text_clip(txt: str):
             base_kwargs = dict(
                 color="white",
                 method="caption",
@@ -468,14 +488,127 @@ class MediaFactory:
                 return kwargs
 
             try:
-                return TextClip(**_make_kwargs(include_font=True))
-            except Exception:  # fallback when font fails or incompatible args
-                return TextClip(**_make_kwargs(include_font=False))
+                clip = TextClip(**_make_kwargs(include_font=True))
+            except Exception:
+                clip = TextClip(**_make_kwargs(include_font=False))
+            return clip
+
+        def generator(txt):
+            duration = max(_next_duration(), 0.1)
+            clip = _set_duration(_create_text_clip(txt), duration + 0.05)
+            if hasattr(clip, "with_mask"):
+                clip = clip.with_mask()
+
+            base_frame = None
+            mask_frame = None
+            if animation_mode in {"typewriter", "fire"}:
+                base_frame = clip.get_frame(0)
+                if getattr(clip, "mask", None) is not None:
+                    mask_frame = clip.mask.get_frame(0)
+
+            if animation_mode in slide_modes:
+                offset_y = self.canvas_size[1] * 0.08
+                offset_x = self.canvas_size[0] * 0.12
+
+                def pos_func(t: float):
+                    progress = min(max(t / 0.25, 0.0), 1.0)
+                    slide = 1.0 - progress
+                    if animation_mode == "slide_up":
+                        return ("center", base_y + offset_y * slide)
+                    if animation_mode == "slide_down":
+                        return ("center", base_y - offset_y * slide)
+                    if animation_mode == "slide_left":
+                        return (
+                            self.canvas_size[0] / 2 + offset_x * slide,
+                            base_y,
+                        )
+                    return (
+                        self.canvas_size[0] / 2 - offset_x * slide,
+                        base_y,
+                    )
+
+                clip = _with_position(clip, pos_func)
+            elif animation_mode == "bounce":
+                amplitude = self.subtitle_fontsize * 0.45
+
+                def bounce_position(t: float):
+                    if duration <= 0:
+                        return ("center", base_y)
+                    progress = max(0.0, min(t / duration, 1.0))
+                    bounce = math.sin(progress * math.pi * 2.2)
+                    decay = math.exp(-2.2 * progress)
+                    return ("center", base_y - amplitude * bounce * decay)
+
+                clip = _with_position(clip, bounce_position)
+            elif animation_mode == "typewriter":
+                if base_frame is None:
+                    base_frame = clip.get_frame(0)
+                total_w = base_frame.shape[1]
+
+                def make_typewriter_frame(t: float):
+                    frame = base_frame.copy()
+                    progress = max(0.0, min(t / max(duration, 1e-3), 1.0))
+                    cutoff = int(total_w * progress)
+                    if cutoff < frame.shape[1]:
+                        frame[:, cutoff:, ...] = 0
+                    return frame
+
+                animated = VideoClip(make_typewriter_frame, duration=duration + 0.05)
+                if mask_frame is not None:
+                    total_mask_w = mask_frame.shape[1]
+
+                    def make_typewriter_mask(t: float):
+                        mask = mask_frame.copy()
+                        progress = max(0.0, min(t / max(duration, 1e-3), 1.0))
+                        cutoff = int(total_mask_w * progress)
+                        if cutoff < mask.shape[1]:
+                            mask[:, cutoff:] = 0
+                        return mask
+
+                    animated.mask = VideoClip(make_typewriter_mask, is_mask=True, duration=duration + 0.05)
+                clip = animated
+            elif animation_mode == "highlight":
+                pad_x = int(self.subtitle_fontsize * 0.9)
+                pad_y = int(self.subtitle_fontsize * 0.6)
+                clip_w, clip_h = _clip_dimensions(clip)
+                box_w = int(max((clip_w or 0) + pad_x, self.canvas_size[0] // 3))
+                box_h = int(max((clip_h or 0) + pad_y, self.subtitle_fontsize * 1.6))
+                box = ColorClip(size=(box_w, box_h), color=(24, 30, 52))
+                box = _set_duration(box, duration + 0.05)
+                if hasattr(box, "with_opacity"):
+                    box = box.with_opacity(0.55)
+                elif hasattr(box, "set_opacity"):
+                    box = box.set_opacity(0.55)
+                centered_text = _with_position(clip, "center")
+                clip = CompositeVideoClip(
+                    [
+                        box,
+                        centered_text,
+                    ],
+                    size=(box_w, box_h),
+                )
+                clip = _set_duration(clip, duration + 0.05)
+            elif animation_mode == "fire":
+                if base_frame is None:
+                    base_frame = clip.get_frame(0)
+                def make_fire_frame(t: float):
+                    frame = base_frame.astype(np.float32).copy()
+                    flicker = 0.6 + 0.4 * math.sin(t * 8.5)
+                    warm = np.array([1.0, 0.55 + 0.35 * flicker, 0.25 + 0.2 * flicker], dtype=np.float32)
+                    frame *= warm
+                    return np.clip(frame, 0, 255).astype(np.uint8)
+
+                animated = VideoClip(make_fire_frame, duration=duration + 0.05)
+                if mask_frame is not None:
+                    animated.mask = VideoClip(lambda t: mask_frame, is_mask=True, duration=duration + 0.05)
+                clip = animated
+
+            return clip
 
         subs = [((cap.start, cap.end), cap.text) for cap in captions]
         subtitles_clip = SubtitlesClip(subs, make_textclip=generator)
-        base_y = self.canvas_size[1] - 250 - self.subtitle_y_offset
-        subtitles_clip = _with_position(subtitles_clip, ("center", base_y))
+        if animation_mode not in slide_modes and animation_mode != "bounce":
+            subtitles_clip = _with_position(subtitles_clip, ("center", base_y))
         video_duration = getattr(video_clip, "duration", None)
         if video_duration is not None:
             subtitles_clip = _set_duration(subtitles_clip, video_duration)

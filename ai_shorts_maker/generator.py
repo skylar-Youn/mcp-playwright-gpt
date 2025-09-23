@@ -139,6 +139,7 @@ def generate_short(options: GenerationOptions) -> Dict[str, Any]:
         subtitle_fontsize=subtitle_style.font_size,
         subtitle_y_offset=subtitle_style.y_offset,
         subtitle_stroke_width=subtitle_style.stroke_width,
+        subtitle_animation=subtitle_style.animation,
     )
     subtitle_style.font_path = media_factory.subtitle_font
     logger.info("Building background visuals (duration %.2fs)...", voice_duration)

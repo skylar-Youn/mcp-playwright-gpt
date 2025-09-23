@@ -52,6 +52,7 @@ class SubtitleStyleRequest(BaseModel):
     y_offset: Optional[int] = None
     stroke_width: Optional[int] = None
     font_path: Optional[str] = None
+    animation: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,21 @@ ASSETS_DIR = PACKAGE_DIR / "assets"
 OUTPUT_DIR = PACKAGE_DIR / "outputs"
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
+
+LANG_OPTIONS: List[tuple[str, str]] = [
+    ("ko", "한국어"),
+    ("en", "English"),
+    ("ja", "日本語"),
+]
+LANG_OPTION_SET = {code for code, _ in LANG_OPTIONS}
+
+
+def sanitize_lang(value: Optional[str]) -> str:
+    if not value:
+        return "ko"
+    value_lower = value.lower()
+    return value_lower if value_lower in LANG_OPTION_SET else "ko"
+
 
 load_dotenv()
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -221,6 +237,7 @@ async def index(request: Request):
         "project_summaries": project_summaries,
         "selected_project": selected_base,
         "version_history_json": version_history_json,
+        "lang_options": LANG_OPTIONS,
     }
     return templates.TemplateResponse("index.html", context)
 
@@ -244,6 +261,8 @@ async def generate(
     script_model: str = Form("gpt-4o-mini"),
     tts_model: str = Form("gpt-4o-mini-tts"),
 ):
+    lang = sanitize_lang(lang)
+
     form_values = {
         "topic": topic,
         "style": style,
@@ -312,6 +331,7 @@ async def generate(
         "project_summaries": list_projects(OUTPUT_DIR),
         "selected_project": selected_project,
         "version_history_json": version_history_json,
+        "lang_options": LANG_OPTIONS,
     }
     return templates.TemplateResponse("index.html", context)
 
@@ -321,7 +341,7 @@ def default_form_values() -> Dict[str, Any]:
         "topic": "무서운 썰",
         "style": "공포/미스터리",
         "duration": 30,
-        "lang": "ko",
+        "lang": sanitize_lang("ko"),
         "voice": "alloy",
         "fps": 24,
         "music": "on",
