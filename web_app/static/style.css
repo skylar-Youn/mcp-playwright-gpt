@@ -239,6 +239,13 @@ summary {
     min-width: 130px;
 }
 
+.control-subtitle {
+    margin: 10px 0 4px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #d8dcff;
+}
+
 .timeline-editor textarea {
     width: 100%;
     min-height: 220px;

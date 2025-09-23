@@ -139,6 +139,7 @@
                 <button type="button" onclick="addTimelineSegment()">세그먼트 추가</button>
                 <button type="button" class="danger" onclick="removeTimelineSegment()">선택 삭제</button>
             </div>
+            <h4 class="control-subtitle">선택 세그먼트 수동 조정</h4>
             <div class="control-row extras">
                 <label>Pos X <input type="number" step="1" id="segment-pos-x"></label>
                 <label>Pos Y <input type="number" step="1" id="segment-pos-y"></label>
@@ -147,6 +148,7 @@
                 <label>Scale 시작 <input type="number" step="0.05" min="0.1" id="segment-scale-start"></label>
                 <label>Scale 끝 <input type="number" step="0.05" min="0.1" id="segment-scale-end"></label>
             </div>
+            <h4 class="control-subtitle">선택 세그먼트 자동 모션</h4>
             <div class="control-row extras">
                 <label><input type="checkbox" id="segment-auto-enabled" checked> 자동 모션</label>
                 <label>모션 종류
@@ -166,6 +168,7 @@
                 <label>기본 스케일 <input type="number" step="0.01" min="1" id="segment-auto-base" placeholder="1.10"></label>
                 <label>이동량(비율) <input type="number" step="0.01" min="0" max="0.3" id="segment-auto-shift" placeholder="자동"></label>
             </div>
+            <h4 class="control-subtitle">새 세그먼트 수동 조정</h4>
             <div class="control-row extras">
                 <label>새 Pos X <input type="number" step="1" id="new-pos-x"></label>
                 <label>새 Pos Y <input type="number" step="1" id="new-pos-y"></label>
@@ -174,6 +177,7 @@
                 <label>새 Scale 시작 <input type="number" step="0.05" min="0.1" id="new-scale-start"></label>
                 <label>새 Scale 끝 <input type="number" step="0.05" min="0.1" id="new-scale-end"></label>
             </div>
+            <h4 class="control-subtitle">새 세그먼트 자동 모션</h4>
             <div class="control-row extras">
                 <label><input type="checkbox" id="new-auto-enabled" checked> 자동 모션</label>
                 <label>모션 종류

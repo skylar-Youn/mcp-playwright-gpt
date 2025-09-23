@@ -248,8 +248,6 @@ def _auto_motion_parameters(
     shift_ratio: Optional[float],
 ) -> dict[str, Optional[float | tuple[float, float]]]:
     width, height = canvas_size
-    center_x = width / 2
-    center_y = height / 2
 
     mode = (mode or "kenburns").lower()
     strength = max(0.0, min(strength, 0.5))
@@ -258,70 +256,101 @@ def _auto_motion_parameters(
     base_scale = max(base_scale, 1.0)
     base_scale = max(base_scale, 1.0 + shift_ratio * 1.25)
 
-    offset_x = width * shift_ratio * 0.5
-    offset_y = height * shift_ratio * 0.5
+    desired_shift_x = width * shift_ratio * 0.5
+    desired_shift_y = height * shift_ratio * 0.5
+
+    def shift_limit(scale: float, axis: str) -> float:
+        if axis == "x":
+            return max(width * (scale - 1.0) / 2.0, 0.0)
+        return max(height * (scale - 1.0) / 2.0, 0.0)
+
+    def clamp_shift(scale_a: float, scale_b: float, desired: float, axis: str) -> float:
+        limit = min(shift_limit(scale_a, axis), shift_limit(scale_b, axis))
+        if limit <= 0:
+            return 0.0
+        return max(min(desired, limit * 0.95), -limit * 0.95)
 
     if mode in {"none", "off"}:
-        return {"scale_start": None, "scale_end": None, "position": None, "position_end": None}
+        return {
+            "scale_start": None,
+            "scale_end": None,
+            "center_start": (0.0, 0.0),
+            "center_end": (0.0, 0.0),
+        }
 
     if mode == "zoom_out":
+        scale_start = base_scale * (1.0 + strength)
+        scale_end = base_scale
         return {
-            "scale_start": base_scale * (1.0 + strength),
-            "scale_end": base_scale,
-            "position": (center_x, center_y),
-            "position_end": (center_x, center_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (0.0, 0.0),
+            "center_end": (0.0, 0.0),
         }
 
     if mode == "zoom_in":
+        scale_start = base_scale
+        scale_end = base_scale * (1.0 + strength)
         return {
-            "scale_start": base_scale,
-            "scale_end": base_scale * (1.0 + strength),
-            "position": (center_x, center_y),
-            "position_end": (center_x, center_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (0.0, 0.0),
+            "center_end": (0.0, 0.0),
         }
 
     if mode == "pan_left":
-        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        scale_start = base_scale
+        scale_end = max(base_scale, base_scale * (1.0 + strength * 0.1))
+        shift = clamp_shift(scale_start, scale_end, desired_shift_x, "x")
         return {
-            "scale_start": base_scale,
-            "scale_end": base_scale,
-            "position": (center_x + offset_x, center_y),
-            "position_end": (center_x - offset_x, center_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (shift, 0.0),
+            "center_end": (-shift, 0.0),
         }
 
     if mode == "pan_right":
-        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        scale_start = base_scale
+        scale_end = max(base_scale, base_scale * (1.0 + strength * 0.1))
+        shift = clamp_shift(scale_start, scale_end, desired_shift_x, "x")
         return {
-            "scale_start": base_scale,
-            "scale_end": base_scale,
-            "position": (center_x - offset_x, center_y),
-            "position_end": (center_x + offset_x, center_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (-shift, 0.0),
+            "center_end": (shift, 0.0),
         }
 
     if mode == "pan_up":
-        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        scale_start = base_scale
+        scale_end = max(base_scale, base_scale * (1.0 + strength * 0.1))
+        shift = clamp_shift(scale_start, scale_end, desired_shift_y, "y")
         return {
-            "scale_start": base_scale,
-            "scale_end": base_scale,
-            "position": (center_x, center_y + offset_y),
-            "position_end": (center_x, center_y - offset_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (0.0, shift),
+            "center_end": (0.0, -shift),
         }
 
     if mode == "pan_down":
-        base_scale = max(base_scale, 1.0 + shift_ratio * 1.4)
+        scale_start = base_scale
+        scale_end = max(base_scale, base_scale * (1.0 + strength * 0.1))
+        shift = clamp_shift(scale_start, scale_end, desired_shift_y, "y")
         return {
-            "scale_start": base_scale,
-            "scale_end": base_scale,
-            "position": (center_x, center_y - offset_y),
-            "position_end": (center_x, center_y + offset_y),
+            "scale_start": scale_start,
+            "scale_end": scale_end,
+            "center_start": (0.0, -shift),
+            "center_end": (0.0, shift),
         }
 
     # Default: ken burns style (zoom in with gentle vertical drift)
+    scale_start = base_scale
+    scale_end = base_scale * (1.0 + strength)
+    shift = clamp_shift(scale_start, scale_end, desired_shift_y, "y")
     return {
-        "scale_start": base_scale,
-        "scale_end": base_scale * (1.0 + strength),
-        "position": (center_x, center_y + offset_y),
-        "position_end": (center_x, center_y - offset_y),
+        "scale_start": scale_start,
+        "scale_end": scale_end,
+        "center_start": (0.0, shift),
+        "center_end": (0.0, -shift),
     }
 
 
@@ -385,6 +414,8 @@ def _segment_to_clip(
 
     scale_start = extras.get("scale_start")
     scale_end = extras.get("scale_end")
+    center_start = None
+    center_end = None
 
     manual_scale = scale_start is not None or scale_end is not None
     manual_position = position is not None or position_end is not None
@@ -403,37 +434,10 @@ def _segment_to_clip(
             _as_float(auto_strength, 0.12) or 0.12,
             _as_float(auto_shift, None),
         )
-        position = params.get("position", position)
-        position_end = params.get("position_end", position_end)
+        center_start = params.get("center_start", center_start)
+        center_end = params.get("center_end", center_end)
         scale_start = params.get("scale_start", scale_start)
         scale_end = params.get("scale_end", scale_end)
-
-    if position is not None:
-        if isinstance(position, (list, tuple)):
-            clip = _with_position(clip, tuple(position))
-        else:
-            clip = _with_position(clip, position)
-    elif _is_overlay(segment):
-        clip = _with_position(clip, "center")
-
-    if (
-        position is not None
-        and position_end is not None
-        and isinstance(position, (list, tuple))
-        and isinstance(position_end, (list, tuple))
-    ):
-        start_pos = tuple(position)
-        end_pos = tuple(position_end)
-
-        def pos_func(t: float):
-            if duration <= 0:
-                return end_pos
-            ratio = max(0.0, min(t / duration, 1.0))
-            x = start_pos[0] + (end_pos[0] - start_pos[0]) * ratio
-            y = start_pos[1] + (end_pos[1] - start_pos[1]) * ratio
-            return (x, y)
-
-        clip = _with_position(clip, pos_func)
 
     def _apply_scale_effect(target_clip, scale):
         def _sanitize(value):
@@ -478,22 +482,101 @@ def _segment_to_clip(
         scale_start = extras.get("scale_start")
     if scale_end is None:
         scale_end = extras.get("scale_end")
-    if scale_start is not None or scale_end is not None:
+
+    scale_start_val = _as_float(scale_start, None)
+    scale_end_val = _as_float(scale_end, None)
+    if scale_start_val is None and scale_end_val is None:
+        scale_start_val = 1.0
+        scale_end_val = 1.0
+    else:
+        if scale_start_val is None:
+            scale_start_val = 1.0
+        if scale_end_val is None:
+            scale_end_val = scale_start_val
+
+    apply_scale_effect = (
+        scale_start is not None
+        or scale_end is not None
+        or scale_start_val != 1.0
+        or scale_end_val != 1.0
+    )
+
+    if apply_scale_effect:
         try:
-            start_scale = float(scale_start) if scale_start is not None else 1.0
-            end_scale = float(scale_end) if scale_end is not None else start_scale
-            if abs(end_scale - start_scale) < 1e-3:
-                clip = _apply_scale_effect(clip, start_scale)
+            if abs(scale_end_val - scale_start_val) < 1e-3:
+                clip = _apply_scale_effect(clip, scale_start_val)
             else:
                 def scale_func(t: float):
                     if duration <= 0:
-                        return end_scale
+                        return scale_end_val
                     ratio = max(0.0, min(t / duration, 1.0))
-                    return start_scale + (end_scale - start_scale) * ratio
+                    return scale_start_val + (scale_end_val - scale_start_val) * ratio
 
                 clip = _apply_scale_effect(clip, scale_func)
         except Exception:
             pass
+
+    def _center_to_top_left(scale_value: float, center_offset: tuple[float, float]):
+        scale_value = max(scale_value, 1.0)
+        margin_x = factory.canvas_size[0] * (scale_value - 1.0) / 2.0
+        margin_y = factory.canvas_size[1] * (scale_value - 1.0) / 2.0
+        cx = max(min(center_offset[0], margin_x), -margin_x)
+        cy = max(min(center_offset[1], margin_y), -margin_y)
+        return (-margin_x + cx, -margin_y + cy)
+
+    pos_start = None
+    pos_end = None
+    use_auto = False
+
+    if position is not None:
+        pos_start = position
+        pos_end = position_end if position_end is not None else pos_start
+    elif center_start is not None or center_end is not None:
+        start_center = center_start or (0.0, 0.0)
+        end_center = center_end or start_center
+        pos_start = _center_to_top_left(scale_start_val, start_center)
+        pos_end = _center_to_top_left(scale_end_val, end_center)
+        use_auto = True
+    else:
+        pos_start = "center" if _is_overlay(segment) else (0.0, 0.0)
+        pos_end = pos_start
+
+    if isinstance(pos_start, tuple) and isinstance(pos_end, tuple) and any(abs(a - b) > 1e-3 for a, b in zip(pos_start, pos_end)):
+        if use_auto:
+            start_center = center_start or (0.0, 0.0)
+            end_center = center_end or start_center
+
+            def pos_func(t: float):
+                if duration <= 0:
+                    ratio = 1.0
+                else:
+                    ratio = max(0.0, min(t / duration, 1.0))
+                scale_value = scale_start_val + (scale_end_val - scale_start_val) * ratio
+                current_center = (
+                    start_center[0] + (end_center[0] - start_center[0]) * ratio,
+                    start_center[1] + (end_center[1] - start_center[1]) * ratio,
+                )
+                return _center_to_top_left(scale_value, current_center)
+
+            clip = _with_position(clip, pos_func)
+        else:
+            def pos_func(t: float):
+                if duration <= 0:
+                    return pos_end
+                ratio = max(0.0, min(t / duration, 1.0))
+                x = pos_start[0] + (pos_end[0] - pos_start[0]) * ratio
+                y = pos_start[1] + (pos_end[1] - pos_start[1]) * ratio
+                return (x, y)
+
+            clip = _with_position(clip, pos_func)
+    else:
+        if isinstance(pos_start, tuple):
+            clip = _with_position(clip, tuple(pos_start))
+        else:
+            clip = _with_position(clip, pos_start)
+
+    if pos_start is None and _is_overlay(segment):
+        clip = _with_position(clip, "center")
 
     alpha = extras.get("alpha")
     if alpha is not None:
