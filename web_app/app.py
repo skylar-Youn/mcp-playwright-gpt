@@ -69,6 +69,8 @@ from ai_shorts_maker.translator import (
     translate_project_segments,
     synthesize_voice_for_project,
     render_translated_project,
+    list_translation_versions,
+    load_translation_version,
     UPLOADS_DIR,
 )
 from youtube.ytdl import download_with_options, parse_sub_langs
@@ -315,9 +317,30 @@ async def api_list_downloads() -> List[Dict[str, str]]:
     return downloads_listing()
 
 
+@translator_router.get("/settings")
+def api_get_translator_settings() -> Dict[str, Any]:
+    return load_translator_settings()
+
+
+@translator_router.post("/settings")
+def api_save_translator_settings(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        save_translator_settings(payload)
+        return {"success": True, "message": "Settings saved successfully"}
+    except Exception as exc:
+        logger.exception("Failed to save translator settings")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @translator_router.post("/projects", response_model=TranslatorProject)
 async def api_create_translator_project(payload: TranslatorProjectCreate) -> TranslatorProject:
     try:
+        settings_to_save = {
+            "target_lang": payload.target_lang,
+            "translation_mode": payload.translation_mode,
+            "tone_hint": payload.tone_hint,
+        }
+        save_translator_settings(settings_to_save)
         return await run_in_threadpool(translator_create_project, payload)
     except Exception as exc:
         logger.exception("Failed to create translator project")
@@ -384,6 +407,77 @@ async def api_render_project(project_id: str) -> TranslatorProject:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.get("/projects/{project_id}/versions")
+async def api_list_translation_versions(project_id: str):
+    try:
+        return await run_in_threadpool(list_translation_versions, project_id)
+    except Exception as exc:
+        logger.exception("Failed to list translation versions for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.get("/projects/{project_id}/versions/{version}")
+async def api_get_translation_version(project_id: str, version: int):
+    try:
+        result = await run_in_threadpool(load_translation_version, project_id, version)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Version {version} not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load translation version %s for project %s", version, project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/reverse-translate")
+async def api_reverse_translate(project_id: str, payload: Dict[str, Any] = Body(...)):
+    try:
+        segment_id = payload.get("segment_id")
+        japanese_text = payload.get("japanese_text", "").strip()
+
+        if not japanese_text:
+            raise HTTPException(status_code=400, detail="Japanese text is required")
+
+        # Use the existing translate_project_segments function with reverse parameters
+        from ai_shorts_maker.translator import translate_text
+
+        korean_text = await run_in_threadpool(
+            translate_text,
+            japanese_text,
+            target_lang="ko",  # Japanese to Korean
+            translation_mode="reinterpret",
+            tone_hint=None
+        )
+
+        return {"korean_text": korean_text}
+
+    except Exception as exc:
+        logger.exception("Failed to reverse translate text for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.patch("/projects/{project_id}/segments")
+async def api_update_segment_text(project_id: str, payload: Dict[str, Any] = Body(...)):
+    try:
+        segment_id = payload.get("segment_id")
+        text_type = payload.get("text_type")
+        text_value = payload.get("text_value", "")
+
+        if not segment_id or not text_type:
+            raise HTTPException(status_code=400, detail="segment_id and text_type are required")
+
+        from ai_shorts_maker.translator import update_segment_text
+
+        await run_in_threadpool(update_segment_text, project_id, segment_id, text_type, text_value)
+
+        return {"success": True}
+
+    except Exception as exc:
+        logger.exception("Failed to update segment text for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 app.include_router(translator_router)
 
 
@@ -430,6 +524,38 @@ def save_ytdl_settings(values: Dict[str, Any]) -> None:
         )
     except OSError as exc:
         logger.warning("Failed to save YTDL settings: %s", exc)
+
+
+TRANSLATOR_SETTINGS_PATH = BASE_DIR / "translator_settings.json"
+DEFAULT_TRANSLATOR_SETTINGS: Dict[str, Any] = {
+    "target_lang": "ja",
+    "translation_mode": "reinterpret",
+    "tone_hint": "드라마하고 유쾌하먼서 유머러스하게",
+}
+
+def load_translator_settings() -> Dict[str, Any]:
+    settings = DEFAULT_TRANSLATOR_SETTINGS.copy()
+    if TRANSLATOR_SETTINGS_PATH.exists():
+        try:
+            data = json.loads(TRANSLATOR_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                settings.update(data)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load Translator settings: %s", exc)
+    return settings
+
+def save_translator_settings(values: Dict[str, Any]) -> None:
+    payload = {}
+    for key in DEFAULT_TRANSLATOR_SETTINGS:
+        if key in values and values[key] is not None:
+            payload[key] = values[key]
+    try:
+        TRANSLATOR_SETTINGS_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Failed to save Translator settings: %s", exc)
 
 
 def _split_urls(raw: str) -> List[str]:
@@ -568,6 +694,12 @@ async def dashboard(request: Request):
 async def translator_page(request: Request):
     context = {"request": request}
     return templates.TemplateResponse("translator.html", context)
+
+
+@app.get("/test-simple", response_class=HTMLResponse)
+async def test_simple_page(request: Request):
+    context = {"request": request}
+    return templates.TemplateResponse("test_simple.html", context)
 
 
 @app.get("/shorts", response_class=HTMLResponse)

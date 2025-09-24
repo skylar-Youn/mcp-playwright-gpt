@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript 테스트</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .loading { background-color: #fff3cd; border: 1px solid #ffeaa7; }
+        .success { background-color: #d4edda; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; border: 1px solid #f5c6cb; }
+        .files { margin-top: 20px; }
+        .file-item { padding: 8px; margin: 4px 0; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>다운로드 파일 테스트</h1>
+
+    <div id="status" class="status loading">JavaScript 로딩 중...</div>
+    <div id="api-status" class="status loading">API 호출 대기 중...</div>
+
+    <div class="files">
+        <h2>다운로드된 파일들:</h2>
+        <div id="files-list">로딩 중...</div>
+    </div>
+
+    <script>
+        console.log('JavaScript 시작됨');
+
+        // JavaScript 로딩 확인
+        document.getElementById('status').innerHTML = '✅ JavaScript 로딩 완료';
+        document.getElementById('status').className = 'status success';
+
+        // API 호출 테스트
+        async function testAPI() {
+            try {
+                document.getElementById('api-status').innerHTML = 'API 호출 중...';
+
+                const response = await fetch('/api/translator/downloads');
+                console.log('API 응답 상태:', response.status);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('받은 데이터:', data);
+
+                document.getElementById('api-status').innerHTML = `✅ API 호출 성공 (${data.length}개 파일)`;
+                document.getElementById('api-status').className = 'status success';
+
+                // 파일 목록 표시
+                const filesList = document.getElementById('files-list');
+                if (data && data.length > 0) {
+                    const filesHTML = data.map((file, index) => `
+                        <div class="file-item">
+                            <strong>${index + 1}. ${file.base_name}</strong><br>
+                            <small>비디오: ${file.video_path}</small><br>
+                            <small>자막: ${file.subtitle_path || '없음'}</small>
+                        </div>
+                    `).join('');
+                    filesList.innerHTML = filesHTML;
+                } else {
+                    filesList.innerHTML = '<div class="file-item">파일이 없습니다.</div>';
+                }
+
+            } catch (error) {
+                console.error('API 오류:', error);
+                document.getElementById('api-status').innerHTML = `❌ API 오류: ${error.message}`;
+                document.getElementById('api-status').className = 'status error';
+                document.getElementById('files-list').innerHTML = `<div class="file-item error">오류: ${error.message}</div>`;
+            }
+        }
+
+        // DOM 로딩 완료 후 API 호출
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', testAPI);
+        } else {
+            testAPI();
+        }
+    </script>
+</body>
+</html>

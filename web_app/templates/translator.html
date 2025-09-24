@@ -36,33 +36,42 @@
                 </div>
                 <div id="downloads-list" class="downloads-list">
                     <p class="empty-state">다운로드된 파일을 불러오는 중...</p>
+                    <p class="empty-state" style="color: #666; font-size: 0.9em;">
+                        만약 이 메시지가 계속 표시된다면
+                        <button onclick="location.reload(true)" style="margin: 0 5px; padding: 2px 8px;">강제 새로고침</button>
+                        또는 개발자 도구(F12)에서 콘솔 오류를 확인해주세요.
+                    </p>
                 </div>
             </section>
 
             <section class="panel">
                 <div class="panel-header">
                     <h2>2. 번역 설정</h2>
+                    <div>
+                        <button type="button" id="load-settings-btn" class="btn-secondary btn-sm">지난 설정 불러오기</button>
+                        <button type="button" id="save-settings-btn" class="btn-secondary btn-sm">설정 저장</button>
+                    </div>
                 </div>
-                <form id="creation-form" class="form-grid">
+                <form id="creation-form" class="form-grid" autocomplete="off">
                     <div class="form-group">
                         <label for="target-lang">목표 언어</label>
-                        <select id="target-lang" name="target_lang" class="form-control">
+                        <select id="target-lang" name="target_lang" class="form-control" autocomplete="off">
                             <option value="ko">한국어</option>
                             <option value="en">English</option>
-                            <option value="ja">日本語</option>
+                            <option value="ja" selected>日本語</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="translation-mode">번역 모드</label>
                         <select id="translation-mode" name="translation_mode" class="form-control">
-                            <option value="adaptive">적응형 (기본)</option>
+                            <option value="adaptive">적응형</option>
                             <option value="literal">직역</option>
-                            <option value="reinterpret">재해석</option>
+                            <option value="reinterpret" selected>재해석 (기본)</option>
                         </select>
                     </div>
                     <div class="form-group form-group-full">
                         <label for="tone-hint">톤/스타일 힌트 (선택 사항)</label>
-                        <input type="text" id="tone-hint" name="tone_hint" class="form-control" placeholder="예: 유머러스하게, 진지하게, 전문가처럼">
+                        <input type="text" id="tone-hint" name="tone_hint" class="form-control" placeholder="드라마하고 유쾌하면서 유머러스하게" value="드라마하고 유쾌하면서 유머러스하게">
                     </div>
                     <div class="form-group form-group-full">
                         <button type="submit" class="btn-primary">번역 프로젝트 생성</button>
@@ -72,13 +81,15 @@
         </div>
     </div>
 
+
+
     <script>
     (function () {
         const creationView = document.getElementById('creation-view');
         const projectView = document.getElementById('project-view');
         const downloadsList = document.getElementById('downloads-list');
         const creationForm = document.getElementById('creation-form');
-        
+
         const projectTitle = document.getElementById('project-title');
         const projectStatus = document.getElementById('project-status');
         const projectActions = document.getElementById('project-actions');
@@ -87,8 +98,10 @@
         let selectedSource = null;
         let currentProject = null;
 
+
+
         function renderDownloads(items) {
-            if (!items.length) {
+            if (!items || !items.length) {
                 downloadsList.innerHTML = '<p class="empty-state">다운로드된 영상이 없습니다. <a href="/ytdl">유튜브 다운로드</a> 도구를 사용하여 먼저 영상을 받아주세요.</p>';
                 return;
             }
@@ -99,7 +112,7 @@
                 return `
                     <div class="download-item" data-index="${index}">
                         <div class="item-header">
-                            <input type="radio" name="source" id="source-${index}" value='''${JSON.stringify(item)}'''>
+                            <input type="radio" name="source" id="source-${index}" value="${index}">
                             <label for="source-${index}">${videoName}</label>
                         </div>
                         <div class="item-meta">
@@ -112,19 +125,80 @@
             downloadsList.innerHTML = `<div class="form-group">${html}</div>`;
             downloadsList.querySelectorAll('input[name="source"]').forEach(radio => {
                 radio.addEventListener('change', (event) => {
-                    selectedSource = JSON.parse(event.target.value);
+                    const selectedIndex = parseInt(event.target.value, 10);
+                    selectedSource = items[selectedIndex];
                 });
             });
         }
 
         function fetchDownloads() {
-            fetch('/api/translator/downloads')
+            downloadsList.innerHTML = '<p class="empty-state">API 호출 중...</p>';
+
+            // Add cache busting parameter
+            const cacheBuster = Date.now();
+            fetch(`/api/translator/downloads?_cb=${cacheBuster}`)
+                .then(res => {
+                    if (res.ok) {
+                        return res.json();
+                    } else {
+                        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    }
+                })
+                .then(data => {
+                    renderDownloads(data);
+                })
+                .catch(err => {
+                    console.error('Download fetch error:', err);
+                    downloadsList.innerHTML = `<p class="empty-state error">오류가 발생했습니다: ${err.message}</p>`;
+                });
+        }
+
+        function applySettings(settings) {
+            // alert('Received settings: ' + JSON.stringify(settings));
+            if (settings) {
+                document.getElementById('target-lang').value = settings.target_lang || 'ja';
+                document.getElementById('translation-mode').value = settings.translation_mode || 'reinterpret';
+                document.getElementById('tone-hint').value = settings.tone_hint || '드라마하고 유쾌하면서 유머러스하게';
+            }
+        }
+
+        const loadSettingsBtn = document.getElementById('load-settings-btn');
+        if (loadSettingsBtn) {
+            loadSettingsBtn.addEventListener('click', () => {
+                fetch('/api/translator/settings')
+                    .then(res => res.ok ? res.json() : Promise.reject(res))
+                    .then(applySettings)
+                    .catch(err => {
+                        console.error(err);
+                        alert('설정을 불러오는 데 실패했습니다.');
+                    });
+            });
+        }
+
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => {
+                const formData = new FormData(creationForm);
+                const settings = {
+                    target_lang: formData.get('target_lang'),
+                    translation_mode: formData.get('translation_mode'),
+                    tone_hint: formData.get('tone_hint') || null,
+                };
+
+                fetch('/api/translator/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings),
+                })
                 .then(res => res.ok ? res.json() : Promise.reject(res))
-                .then(renderDownloads)
+                .then(result => {
+                    alert('설정이 저장되었습니다.');
+                })
                 .catch(err => {
                     console.error(err);
-                    downloadsList.innerHTML = '<p class="empty-state error">오류가 발생했습니다.</p>';
+                    alert('설정 저장에 실패했습니다.');
                 });
+            });
         }
 
         creationForm.addEventListener('submit', (event) => {
@@ -172,25 +246,116 @@
             projectStatus.textContent = `상태: ${project.status}`;
 
             projectActions.innerHTML = ''; // Clear actions
+
+            // Always show delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.id = 'delete-project-btn';
+            deleteBtn.className = 'btn-secondary';
+            deleteBtn.style.background = 'linear-gradient(120deg, #ff6d6d, #ff3d7f)';
+            deleteBtn.style.color = '#fff6f6';
+            deleteBtn.textContent = '프로젝트 삭제';
+            deleteBtn.addEventListener('click', deleteProject);
+            projectActions.appendChild(deleteBtn);
+
             if (project.status === 'segmenting' || project.status === 'draft') {
-                projectActions.innerHTML = '<button id="translate-btn" class="btn-primary">번역 실행</button>';
-                document.getElementById('translate-btn').addEventListener('click', runTranslation);
+                const translateBtn = document.createElement('button');
+                translateBtn.id = 'translate-btn';
+                translateBtn.className = 'btn-primary';
+                translateBtn.textContent = '번역 실행';
+                translateBtn.addEventListener('click', runTranslation);
+                projectActions.appendChild(translateBtn);
             } else if (project.status === 'voice_ready') {
-                projectActions.innerHTML = '<button id="voice-btn" class="btn-primary">음성 생성</button>';
-                document.getElementById('voice-btn').addEventListener('click', runVoiceSynthesis);
+                const voiceBtn = document.createElement('button');
+                voiceBtn.id = 'voice-btn';
+                voiceBtn.className = 'btn-primary';
+                voiceBtn.textContent = '음성 생성';
+                voiceBtn.addEventListener('click', runVoiceSynthesis);
+                projectActions.appendChild(voiceBtn);
+
+                const reverseTranslateAllBtn = document.createElement('button');
+                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
+                reverseTranslateAllBtn.className = 'btn-secondary';
+                reverseTranslateAllBtn.style.background = 'rgba(255, 209, 102, 0.15)';
+                reverseTranslateAllBtn.style.border = '1px solid rgba(255, 209, 102, 0.6)';
+                reverseTranslateAllBtn.style.color = '#ffd166';
+                reverseTranslateAllBtn.textContent = '전체 역번역';
+                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
+                projectActions.appendChild(reverseTranslateAllBtn);
             } else if (project.status === 'voice_complete') {
-                projectActions.innerHTML = '<button id="render-btn" class="btn-primary">비디오 렌더링</button>';
-                document.getElementById('render-btn').addEventListener('click', runRender);
+                const renderBtn = document.createElement('button');
+                renderBtn.id = 'render-btn';
+                renderBtn.className = 'btn-primary';
+                renderBtn.textContent = '비디오 렌더링';
+                renderBtn.addEventListener('click', runRender);
+                projectActions.appendChild(renderBtn);
+
+                const reverseTranslateAllBtn = document.createElement('button');
+                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
+                reverseTranslateAllBtn.className = 'btn-secondary';
+                reverseTranslateAllBtn.style.background = 'rgba(255, 209, 102, 0.15)';
+                reverseTranslateAllBtn.style.border = '1px solid rgba(255, 209, 102, 0.6)';
+                reverseTranslateAllBtn.style.color = '#ffd166';
+                reverseTranslateAllBtn.textContent = '전체 역번역';
+                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
+                projectActions.appendChild(reverseTranslateAllBtn);
             }
 
-            const segmentsHtml = project.segments.map(seg => `
-                <div class="segment-item">
-                    <div class="segment-time">${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}</div>
-                    <div class="segment-text source">${seg.source_text || ''}</div>
-                    <div class="segment-text translated">${seg.translated_text || ''}</div>
+            const segmentsHtml = project.segments.map((seg, index) => `
+                <div class="segment-item" data-segment-id="${seg.id}">
+                    <div class="segment-header">
+                        <div class="segment-time">${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}</div>
+                        <div class="segment-actions">
+                            <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
+                            <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="segment-content">
+                        <div class="text-pair">
+                            <div class="text-row korean original">
+                                <label>원본 한국어:</label>
+                                <div class="text-content" data-type="source" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.source_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.source_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="source" data-segment-id="${seg.id}" title="한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="source" data-segment-id="${seg.id}" title="한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="source" data-segment-id="${seg.id}" title="한국어 삭제">삭제</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-row japanese">
+                                <label>번역 일본어:</label>
+                                <div class="text-content" data-type="translated" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.translated_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 복사">복사</button>
+                                        <button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 번역">역번역</button>
+                                        <button class="btn-delete-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 삭제">삭제</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-row korean reverse">
+                                <label>역번역 한국어:</label>
+                                <div class="text-content" data-type="reverse_translated" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.reverse_translated_text || ''}</span>
+                                    <input class="text-edit" type="text" value="${(seg.reverse_translated_text || '').replace(/"/g, '&quot;')}" style="display: none;">
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 삭제">삭제</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `).join('');
             segmentsTable.innerHTML = segmentsHtml;
+
+            // Add event listeners for edit/delete buttons
+            attachSegmentEventListeners();
         }
 
         function runTranslation() {
@@ -276,12 +441,282 @@
         const urlParams = new URLSearchParams(window.location.search);
         const projectId = urlParams.get('id');
 
+        function loadInitialSettings() {
+            const cacheBuster = Date.now();
+            fetch(`/api/translator/settings?_cb=${cacheBuster}`)
+                .then(res => {
+                    if (res.ok) {
+                        return res.json();
+                    } else {
+                        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    }
+                })
+                .then(settings => {
+                    applySettings(settings);
+                })
+                .catch(err => {
+                    console.error('Failed to load initial settings:', err);
+                });
+        }
+
+        function attachSegmentEventListeners() {
+            // Edit text buttons
+            document.querySelectorAll('.btn-edit-text').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+                    const textContent = e.target.closest('.text-content');
+                    const textDisplay = textContent.querySelector('.text-display');
+                    const textEdit = textContent.querySelector('.text-edit');
+
+                    if (textDisplay.style.display === 'none') {
+                        // Save changes
+                        const newText = textEdit.value;
+                        updateSegmentText(segmentId, textType, newText);
+                        textDisplay.textContent = newText;
+                        textDisplay.style.display = '';
+                        textEdit.style.display = 'none';
+                        e.target.textContent = '수정';
+                    } else {
+                        // Enter edit mode
+                        textDisplay.style.display = 'none';
+                        textEdit.style.display = '';
+                        textEdit.focus();
+                        e.target.textContent = '저장';
+                    }
+                });
+            });
+
+            // Copy text buttons
+            document.querySelectorAll('.btn-copy-text').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+                    const textDisplay = e.target.closest('.text-content').querySelector('.text-display');
+                    const textToCopy = textDisplay.textContent.trim();
+
+                    if (!textToCopy) {
+                        alert('복사할 텍스트가 없습니다.');
+                        return;
+                    }
+
+                    try {
+                        await navigator.clipboard.writeText(textToCopy);
+                        e.target.textContent = '복사됨';
+                        setTimeout(() => {
+                            e.target.textContent = '복사';
+                        }, 1000);
+                    } catch (err) {
+                        console.error('클립보드 복사 실패:', err);
+                        // Fallback for older browsers
+                        const textarea = document.createElement('textarea');
+                        textarea.value = textToCopy;
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textarea);
+
+                        e.target.textContent = '복사됨';
+                        setTimeout(() => {
+                            e.target.textContent = '복사';
+                        }, 1000);
+                    }
+                });
+            });
+
+            // Reverse translate buttons (Japanese to Korean)
+            document.querySelectorAll('.btn-translate-reverse').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const japaneseText = e.target.closest('.text-content').querySelector('.text-display').textContent.trim();
+
+                    if (!japaneseText) {
+                        alert('번역할 일본어 텍스트가 없습니다.');
+                        return;
+                    }
+
+                    e.target.disabled = true;
+                    e.target.textContent = '번역중...';
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/reverse-translate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                japanese_text: japaneseText
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const result = await response.json();
+
+                        // Update reverse translation Korean text display
+                        const segmentItem = e.target.closest('.segment-item');
+                        const reverseKoreanTextDisplay = segmentItem.querySelector('.text-row.korean.reverse .text-display');
+                        if (reverseKoreanTextDisplay) {
+                            reverseKoreanTextDisplay.textContent = result.korean_text;
+                        } else {
+                            console.error('Cannot find reverse translation text display element');
+                        }
+
+                        // Update the server with the new reverse translated text
+                        updateSegmentText(segmentId, 'reverse_translated', result.korean_text);
+
+                    } catch (err) {
+                        console.error('역번역 실패:', err);
+                        alert('역번역에 실패했습니다: ' + err.message);
+                    } finally {
+                        e.target.disabled = false;
+                        e.target.textContent = '역번역';
+                    }
+                });
+            });
+
+            // Delete text buttons
+            document.querySelectorAll('.btn-delete-text').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const textType = e.target.dataset.type;
+
+                    if (confirm(`정말로 ${textType === 'source' ? '한국어' : '일본어'} 텍스트를 삭제하시겠습니까?`)) {
+                        updateSegmentText(segmentId, textType, '');
+                        const textDisplay = e.target.closest('.text-content').querySelector('.text-display');
+                        textDisplay.textContent = '';
+                    }
+                });
+            });
+        }
+
+        function updateSegmentText(segmentId, textType, newText) {
+            const payload = {
+                segment_id: segmentId,
+                text_type: textType,
+                text_value: newText
+            };
+
+            fetch(`/api/translator/projects/${currentProject.id}/segments`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                // Update successful
+                console.log(`Updated ${textType} for segment ${segmentId}`);
+            })
+            .catch(err => {
+                console.error('Failed to update segment text:', err);
+                alert('텍스트 업데이트에 실패했습니다.');
+            });
+        }
+
+        function runReverseTranslateAll() {
+            const btn = document.getElementById('reverse-translate-all-btn');
+            btn.disabled = true;
+            btn.textContent = '전체 역번역 중...';
+
+            let completedCount = 0;
+            const totalSegments = currentProject.segments.filter(seg => seg.translated_text).length;
+
+            if (totalSegments === 0) {
+                alert('역번역할 일본어 텍스트가 없습니다.');
+                btn.disabled = false;
+                btn.textContent = '전체 역번역';
+                return;
+            }
+
+            // Process each segment with Japanese text
+            currentProject.segments.forEach(async (segment, index) => {
+                if (!segment.translated_text) return;
+
+                try {
+                    const response = await fetch(`/api/translator/projects/${currentProject.id}/reverse-translate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            segment_id: segment.id,
+                            japanese_text: segment.translated_text
+                        })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+
+                        // Update UI
+                        const segmentElement = document.querySelector(`[data-segment-id="${segment.id}"]`);
+                        if (segmentElement) {
+                            const reverseDisplay = segmentElement.querySelector('.text-row.korean.reverse .text-display');
+                            if (reverseDisplay) {
+                                reverseDisplay.textContent = result.korean_text;
+                            }
+                        }
+
+                        // Update server
+                        updateSegmentText(segment.id, 'reverse_translated', result.korean_text);
+                    }
+                } catch (err) {
+                    console.error(`Failed to reverse translate segment ${segment.id}:`, err);
+                }
+
+                completedCount++;
+                if (completedCount === totalSegments) {
+                    btn.disabled = false;
+                    btn.textContent = '전체 역번역';
+                    alert(`전체 역번역 완료! (${completedCount}개 세그먼트)`);
+                }
+            });
+        }
+
+        function deleteProject() {
+            if (!confirm('정말로 이 프로젝트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                return;
+            }
+
+            const deleteBtn = document.getElementById('delete-project-btn');
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = '삭제 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}`, {
+                method: 'DELETE'
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                alert('프로젝트가 삭제되었습니다.');
+                window.location.href = '/translator';
+            })
+            .catch(err => {
+                console.error('Failed to delete project:', err);
+                alert('프로젝트 삭제에 실패했습니다.');
+            })
+            .finally(() => {
+                if (deleteBtn) {
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = '프로젝트 삭제';
+                }
+            });
+        }
+
         if (projectId) {
             loadProject(projectId);
         } else {
             creationView.classList.remove('hidden');
             projectView.classList.add('hidden');
             fetchDownloads();
+            loadInitialSettings();
         }
     })();
     </script>

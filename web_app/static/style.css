@@ -590,3 +590,249 @@ summary {
     color: #9ab3ca;
     text-align: center;
 }
+
+/* Translation page styles */
+.panel-subtitle {
+    margin: 4px 0 0 0;
+    font-size: 0.9rem;
+    color: #b3c3d9;
+}
+
+.downloads-list {
+    margin-top: 16px;
+}
+
+.download-item {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.item-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.85rem;
+    color: #94a6bc;
+    margin-left: 24px;
+}
+
+.text-success { color: #7cf5b4; }
+.text-warning { color: #ffd166; }
+
+.form-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+}
+
+.form-group-full {
+    grid-column: 1 / -1;
+}
+
+.form-control {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: inherit;
+    font-size: 15px;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.12);
+    color: inherit;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.hidden {
+    display: none;
+}
+
+/* Segment editing styles */
+.segments-table {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.segment-item {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.segment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.segment-time {
+    font-weight: 600;
+    color: #4bd4ff;
+    font-size: 0.9rem;
+}
+
+.segment-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-edit-segment,
+.btn-delete-segment {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    transition: background-color 0.2s ease;
+}
+
+.btn-edit-segment:hover {
+    background: rgba(75, 212, 255, 0.15);
+}
+
+.btn-delete-segment:hover {
+    background: rgba(255, 120, 120, 0.15);
+}
+
+.segment-content {
+    margin-top: 8px;
+}
+
+.text-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.text-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+}
+
+.text-row.korean.original {
+    border-left: 3px solid #ff6b6b;
+}
+
+.text-row.japanese {
+    border-left: 3px solid #4bd4ff;
+}
+
+.text-row.korean.reverse {
+    border-left: 3px solid #9b59b6;
+}
+
+.text-row label {
+    min-width: 60px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #b3c3d9;
+}
+
+.text-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.text-display {
+    flex: 1;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    min-height: 20px;
+    font-size: 0.9rem;
+}
+
+.text-edit {
+    flex: 1;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(75, 212, 255, 0.3);
+    border-radius: 4px;
+    color: inherit;
+    font-size: 0.9rem;
+}
+
+.text-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.btn-edit-text,
+.btn-copy-text,
+.btn-translate-reverse,
+.btn-delete-text {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    white-space: nowrap;
+}
+
+.btn-edit-text:hover {
+    background: rgba(75, 212, 255, 0.15);
+}
+
+.btn-copy-text:hover {
+    background: rgba(120, 255, 182, 0.15);
+}
+
+.btn-translate-reverse:hover {
+    background: rgba(255, 209, 102, 0.15);
+}
+
+.btn-delete-text:hover {
+    background: rgba(255, 120, 120, 0.15);
+}
+
+@media (max-width: 720px) {
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .text-pair {
+        gap: 8px;
+    }
+
+    .text-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .text-row label {
+        min-width: auto;
+    }
+}

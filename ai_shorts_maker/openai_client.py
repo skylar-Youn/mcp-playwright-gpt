@@ -66,16 +66,25 @@ class OpenAIShortsClient:
         }
         mode_instruction = mode_map.get(translation_mode, mode_map["adaptive"])
 
-        prompt = f"""Translate the following text into {target_lang}.
+        lang_names = {
+            "ko": "Korean",
+            "ja": "Japanese",
+            "en": "English"
+        }
+        target_lang_name = lang_names.get(target_lang, target_lang)
+
+        prompt = f"""Translate the following text into {target_lang_name}.
 
 {mode_instruction}
 
-Original text:
----
-{text_to_translate}
----
+CRITICAL REQUIREMENTS:
+- Return ONLY the translated text in {target_lang_name}
+- NO English explanations, notes, or commentary
+- NO phrases like "Here's", "Certainly", "This maintains"
+- NO dashes (---) or formatting markers
+- JUST the pure {target_lang_name} translation
 
-Translated text:"""
+Original text: {text_to_translate}"""
 
         if tone_hint:
             prompt += f"\n\nMaintain a {tone_hint} tone."
@@ -87,15 +96,80 @@ Translated text:"""
             messages=[
                 {
                     "role": "system",
-                    "content": "You are an expert translator for short video scripts.",
+                    "content": f"You are a translator. Reply ONLY with the {target_lang_name} text. NO explanations. NO English. NO commentary. NO formatting.",
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7,
+            temperature=0.3,  # Lower temperature for more consistent output
         )
         translated_text = response.choices[0].message.content.strip()
+
+        # Clean up common patterns that appear in responses
+        translated_text = self._clean_translation_response(translated_text, target_lang)
+
         logger.debug("Received translation with %d characters", len(translated_text))
         return translated_text
+
+    def _clean_translation_response(self, text: str, target_lang: str) -> str:
+        """Clean up translation response to remove unwanted English explanations."""
+        lines = text.split('\n')
+        cleaned_lines = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Skip lines that are obviously English explanations
+            english_starters = [
+                'Sure!', 'Here\'s', 'Let me know', '---', 'Translation:', 'Translated text:',
+                'Certainly!', 'I\'ll', 'This', 'The text', 'Here is', 'This maintains',
+                'while conveying', 'meaning', 'tone'
+            ]
+            if any(line.startswith(starter) for starter in english_starters):
+                continue
+
+            # Skip lines containing common English explanation words
+            english_words = [
+                'reinterpretation', 'translation', 'maintains', 'convey', 'meaning',
+                'tone', 'concise', 'same meaning', 'while', 'conveying'
+            ]
+            if any(word in line.lower() for word in english_words):
+                continue
+
+            if line.startswith('*') or line.endswith('*'):
+                continue
+            if line == '---' or line.startswith('---'):
+                continue
+
+            # For Japanese, skip lines that are mostly ASCII (likely English)
+            if target_lang == 'ja':
+                ascii_chars = sum(1 for c in line if ord(c) < 128)
+                total_chars = len(line)
+                if total_chars > 0 and ascii_chars / total_chars > 0.6:
+                    continue
+
+            # For Korean, skip lines that are mostly ASCII (likely English)
+            if target_lang == 'ko':
+                ascii_chars = sum(1 for c in line if ord(c) < 128)
+                total_chars = len(line)
+                if total_chars > 0 and ascii_chars / total_chars > 0.7:
+                    continue
+
+            cleaned_lines.append(line)
+
+        result = '\n'.join(cleaned_lines).strip()
+
+        # If we ended up with empty result, try to extract any non-ASCII text
+        if not result and target_lang in ['ja', 'ko']:
+            non_ascii_chars = []
+            for char in text:
+                if ord(char) > 127 or char in '。、？！':  # Include Japanese/Korean punctuation
+                    non_ascii_chars.append(char)
+            if non_ascii_chars:
+                result = ''.join(non_ascii_chars).strip()
+
+        return result
 
     def synthesize_voice(
         self,

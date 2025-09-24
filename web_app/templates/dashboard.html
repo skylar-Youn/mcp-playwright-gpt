@@ -65,7 +65,7 @@
 
     function projectLink(project) {
         if (project.project_type === 'translator') {
-            return `/translator/${encodeURIComponent(project.id)}`;
+            return `/translator?id=${encodeURIComponent(project.id)}`;
         }
         return `/shorts?existing=${encodeURIComponent(project.id)}`;
     }
