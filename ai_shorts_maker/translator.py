@@ -32,7 +32,10 @@ class TranslatorSegment(BaseModel):
     source_text: Optional[str] = None
     translated_text: Optional[str] = None
     reverse_translated_text: Optional[str] = None
-    commentary: Optional[str] = None  # 해설 텍스트
+    commentary: Optional[str] = None  # 해설 텍스트 (호환성용)
+    commentary_korean: Optional[str] = None  # 해설 한국어
+    commentary_japanese: Optional[str] = None  # 해설 일본어
+    commentary_reverse_korean: Optional[str] = None  # 해설 역번역 한국어
 
 
 class TranslatorProject(BaseModel):
@@ -347,11 +350,29 @@ def load_translation_version(project_id: str, version: int) -> Optional[Dict[str
         return None
 
 
+def _migrate_project_schema(project_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate project data to current schema."""
+    # Ensure voice_synthesis_mode exists
+    if "voice_synthesis_mode" not in project_data:
+        project_data["voice_synthesis_mode"] = "subtitle"
+
+    # Ensure all segments have commentary field
+    if "segments" in project_data:
+        for segment in project_data["segments"]:
+            if "commentary" not in segment:
+                segment["commentary"] = None
+
+    return project_data
+
+
 def load_project(project_id: str) -> TranslatorProject:
     path = _project_path(project_id)
     if not path.exists():
         raise FileNotFoundError(f"Translator project {project_id} not found")
     data = json.loads(path.read_text(encoding="utf-8"))
+
+    # Migrate to current schema
+    data = _migrate_project_schema(data)
     try:
         project = TranslatorProject.model_validate(data)
     except ValidationError as exc:  # pragma: no cover
@@ -735,10 +756,9 @@ def generate_ai_commentary_for_project(project_id: str) -> TranslatorProject:
 해설:"""
 
             try:
-                commentary = client.generate_text(
+                commentary = client.generate_script(
                     prompt=commentary_prompt,
-                    model="gpt-4o-mini",
-                    max_tokens=200
+                    temperature=0.7
                 ).strip()
 
                 segment.commentary = commentary
@@ -758,6 +778,196 @@ def generate_ai_commentary_for_project(project_id: str) -> TranslatorProject:
         logger.exception("Failed to generate AI commentary for project %s", project_id)
         project.status = "failed"
         project.extra["error"] = f"AI 해설 생성 중 오류 발생: {str(exc)}"
+        return save_project(project)
+
+
+def _find_optimal_commentary_positions(segments: List[TranslatorSegment]) -> List[float]:
+    """Find optimal positions to insert commentary between subtitle segments."""
+    commentary_positions = []
+
+    for i in range(len(segments) - 1):
+        current_segment = segments[i]
+        next_segment = segments[i + 1]
+
+        # Calculate gap between current segment end and next segment start
+        gap = next_segment.start - current_segment.end
+
+        # If gap is at least 3 seconds, it's suitable for commentary
+        if gap >= 3.0:
+            # Place commentary in the middle of the gap
+            commentary_time = current_segment.end + (gap / 2)
+            commentary_positions.append(commentary_time)
+        # If gap is between 1.5-3 seconds, place commentary at the end of current segment
+        elif gap >= 1.5:
+            commentary_time = current_segment.end + 0.5
+            commentary_positions.append(commentary_time)
+        # For overlapping segments (negative gap), place commentary at the end of current segment
+        elif gap < 0:
+            # Find a small gap after current segment to insert commentary
+            commentary_time = current_segment.end + 0.3
+            commentary_positions.append(commentary_time)
+
+    # Add commentary at strategic points (every 15-20 seconds) if no natural gaps found
+    if not commentary_positions and segments:
+        video_duration = max(seg.end for seg in segments)
+        # Add commentary every 18 seconds
+        for time_point in [18.0, 36.0, 54.0]:
+            if time_point < video_duration - 5.0:  # Don't add too close to end
+                commentary_positions.append(time_point)
+
+    # Also consider adding commentary at the very beginning if first segment starts late
+    if segments and segments[0].start >= 2.0:
+        commentary_positions.insert(0, segments[0].start - 1.0)
+
+    return sorted(commentary_positions)
+
+
+def _create_commentary_segments(segments: List[TranslatorSegment], commentary_positions: List[float]) -> List[TranslatorSegment]:
+    """Create commentary-only segments at specified positions."""
+    commentary_segments = []
+
+    for i, position in enumerate(commentary_positions):
+        # Commentary segment duration: 2-3 seconds
+        start_time = max(0, position)
+        end_time = start_time + 2.5
+
+        commentary_segment = TranslatorSegment(
+            clip_index=1000 + i,  # Use high index to distinguish commentary segments
+            start=round(start_time, 3),
+            end=round(end_time, 3),
+            source_text=None,  # 원본 자막 (비어있음 - 해설 세그먼트이므로)
+            translated_text=None,  # 자막 번역 (비어있음)
+            reverse_translated_text=None,  # 자막 역번역 (비어있음)
+            commentary_korean=None,  # 해설 한국어
+            commentary_japanese=None,  # 해설 일본어 번역
+            commentary_reverse_korean=None,  # 해설 역번역 한국어
+            commentary=None  # 호환성용
+        )
+        commentary_segments.append(commentary_segment)
+
+    return commentary_segments
+
+
+def generate_korean_ai_commentary_for_project(project_id: str) -> TranslatorProject:
+    """Generate Korean AI commentary and insert at optimal positions."""
+    project = load_project(project_id)
+
+    if project.status not in ["segmenting", "draft", "voice_ready"]:
+        logger.warning("Project %s is not in a state for Korean AI commentary generation (status: %s)", project_id, project.status)
+        return project
+
+    project = populate_segments_from_subtitles(project)
+    if not any(seg.source_text for seg in project.segments):
+        project.status = "failed"
+        project.extra["error"] = "Could not find any source text to generate commentary from."
+        return save_project(project)
+
+    try:
+        from .openai_client import OpenAIShortsClient
+        client = OpenAIShortsClient()
+
+        # Find optimal positions for commentary insertion
+        commentary_positions = _find_optimal_commentary_positions(project.segments)
+        logger.info(f"Found {len(commentary_positions)} optimal positions for commentary")
+
+        # Create commentary segments at these positions
+        commentary_segments = _create_commentary_segments(project.segments, commentary_positions)
+
+        # Generate AI commentary for each commentary segment
+        for i, commentary_segment in enumerate(commentary_segments):
+            # Find the surrounding subtitle segments for context
+            prev_segments = [seg for seg in project.segments if seg.end <= commentary_segment.start]
+            next_segments = [seg for seg in project.segments if seg.start >= commentary_segment.end]
+
+            # Create context from previous segments
+            context_texts = []
+            if prev_segments:
+                # Take last 2 segments for context
+                context_segments = prev_segments[-2:] if len(prev_segments) >= 2 else prev_segments
+                context_texts = [seg.source_text for seg in context_segments if seg.source_text]
+
+            # Create prompt for Korean commentary generation
+            context_str = " ".join(context_texts) if context_texts else "영상 시작"
+            korean_commentary_prompt = f"""다음은 드라마/예능 프로그램의 한국어 자막 내용입니다. 이 상황에서 시청자를 위한 재미있고 유용한 해설을 한국어로 작성해주세요.
+
+이전 자막 내용: "{context_str}"
+
+해설 요구사항:
+- 한국어로 1문장으로 간결하게 작성 (10-15자 내외)
+- 상황을 재미있게 설명하거나 배경 정보 제공
+- 시청자의 이해를 돕는 추가 설명
+- 드라마틱하고 재미있는 톤 사용
+- 이전 내용을 반복하지 말고 새로운 관점 제공
+
+한국어 해설:"""
+
+            try:
+                # Generate Korean commentary
+                korean_commentary = client.generate_script(
+                    prompt=korean_commentary_prompt,
+                    temperature=0.8
+                ).strip()
+                korean_commentary = korean_commentary.strip('"').strip("'")
+                commentary_segment.commentary_korean = korean_commentary
+
+                # Generate Japanese translation
+                japanese_translation_prompt = f"""다음 한국어 해설을 자연스러운 일본어로 번역해주세요.
+
+한국어 해설: "{korean_commentary}"
+
+일본어 번역:"""
+
+                japanese_translation = client.generate_script(
+                    prompt=japanese_translation_prompt,
+                    temperature=0.3
+                ).strip()
+                japanese_translation = japanese_translation.strip('"').strip("'")
+                commentary_segment.commentary_japanese = japanese_translation
+
+                # Generate reverse Korean translation
+                reverse_korean_prompt = f"""다음 일본어 텍스트를 다시 한국어로 역번역해주세요.
+
+일본어 텍스트: "{japanese_translation}"
+
+한국어 역번역:"""
+
+                reverse_korean = client.generate_script(
+                    prompt=reverse_korean_prompt,
+                    temperature=0.3
+                ).strip()
+                reverse_korean = reverse_korean.strip('"').strip("'")
+                commentary_segment.commentary_reverse_korean = reverse_korean
+
+                # Keep commentary field for backward compatibility
+                commentary_segment.commentary = korean_commentary
+
+                logger.info(f"Generated commentary {i+1} - KR: {korean_commentary}, JP: {japanese_translation}, RV: {reverse_korean}")
+
+            except Exception as exc:
+                logger.warning(f"Failed to generate commentary for position {i+1}: {exc}")
+                commentary_segment.commentary_korean = "[해설 생성 실패]"
+                commentary_segment.commentary_japanese = "[翻訳失敗]"
+                commentary_segment.commentary_reverse_korean = "[역번역 실패]"
+                commentary_segment.commentary = "[해설 생성 실패]"
+
+
+        # Merge commentary segments with original segments and sort by time
+        all_segments = project.segments + commentary_segments
+        all_segments.sort(key=lambda seg: seg.start)
+
+        # Update segment clip_index to maintain order
+        for i, segment in enumerate(all_segments):
+            segment.clip_index = i
+
+        project.segments = all_segments
+        project = save_project(project)
+        logger.info(f"Korean AI commentary generation completed for project {project_id}")
+        return project
+
+    except Exception as exc:
+        logger.exception("Failed to generate Korean AI commentary for project %s", project_id)
+        project.status = "failed"
+        project.extra["error"] = f"한국어 AI 해설 생성 중 오류 발생: {str(exc)}"
         return save_project(project)
 
 
@@ -787,8 +997,13 @@ def translate_project_segments(project_id: str) -> TranslatorProject:
             if not segment.source_text:
                 continue
 
+            # Remove ">>" prefix from source text for translation
+            text_to_translate = segment.source_text.lstrip(">> ").strip()
+            if not text_to_translate:
+                continue
+
             translated = client.translate_text(
-                text_to_translate=segment.source_text,
+                text_to_translate=text_to_translate,
                 target_lang=project.target_lang,
                 translation_mode=project.translation_mode,
                 tone_hint=project.tone_hint,
@@ -897,6 +1112,52 @@ def update_segment_time(project_id: str, segment_id: str, start_time: float, end
     # If this is a reverse translation update, re-save the translation texts
     if text_type == "reverse_translated":
         _save_translation_texts(project)
+
+
+def reorder_project_segments(project_id: str, segment_orders: List[Dict[str, Any]]) -> TranslatorProject:
+    """Reorder segments in the project based on the provided order list."""
+    project = load_project(project_id)
+    if not project:
+        raise FileNotFoundError(f"Project {project_id} not found")
+
+    # Create a mapping of segment_id to new_index
+    order_map = {order["segment_id"]: order["new_index"] for order in segment_orders}
+
+    # Sort segments by the new index order
+    reordered_segments = []
+    for order in sorted(segment_orders, key=lambda x: x["new_index"]):
+        segment_id = order["segment_id"]
+        # Find the segment with this ID
+        segment = next((seg for seg in project.segments if seg.id == segment_id), None)
+        if segment:
+            # Update clip_index to match the new order
+            segment.clip_index = order["new_index"]
+            reordered_segments.append(segment)
+
+    # Replace the segments list with the reordered one
+    project.segments = reordered_segments
+
+    # Save the updated project
+    save_project(project)
+    logger.info(f"Reordered segments in project {project_id}")
+
+    return project
+
+
+def reset_project_to_translated(project_id: str) -> TranslatorProject:
+    """Reset project status back to translated state to allow editing."""
+    project = load_project(project_id)
+    if not project:
+        raise FileNotFoundError(f"Project {project_id} not found")
+
+    # Reset status to translated state
+    project.status = "translated"
+
+    # Save the updated project
+    save_project(project)
+    logger.info(f"Reset project {project_id} to translated state")
+
+    return project
 
 
 def _save_translation_texts(project: TranslatorProject) -> None:
@@ -1078,6 +1339,7 @@ __all__ = [
     "downloads_listing",
     "aggregate_dashboard_projects",
     "generate_ai_commentary_for_project",
+    "generate_korean_ai_commentary_for_project",
     "translate_project_segments",
     "synthesize_voice_for_project",
     "render_translated_project",

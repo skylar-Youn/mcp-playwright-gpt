@@ -333,6 +333,17 @@ def api_save_translator_settings(payload: Dict[str, Any] = Body(...)) -> Dict[st
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.get("/projects")
+async def api_list_translator_projects():
+    try:
+        from ai_shorts_maker.translator import list_projects
+        projects = await run_in_threadpool(list_projects)
+        return projects
+    except Exception as exc:
+        logger.exception("Failed to list translator projects")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @translator_router.post("/projects", response_model=TranslatorProject)
 async def api_create_translator_project(payload: TranslatorProjectCreate) -> TranslatorProject:
     try:
@@ -388,6 +399,16 @@ async def api_generate_ai_commentary(project_id: str) -> TranslatorProject:
         return await run_in_threadpool(generate_ai_commentary_for_project, project_id)
     except Exception as exc:
         logger.exception("Failed to generate AI commentary for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/generate-korean-commentary", response_model=TranslatorProject)
+async def api_generate_korean_ai_commentary(project_id: str) -> TranslatorProject:
+    try:
+        from ai_shorts_maker.translator import generate_korean_ai_commentary_for_project
+        return await run_in_threadpool(generate_korean_ai_commentary_for_project, project_id)
+    except Exception as exc:
+        logger.exception("Failed to generate Korean AI commentary for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -486,6 +507,37 @@ async def api_update_segment_text(project_id: str, payload: Dict[str, Any] = Bod
 
     except Exception as exc:
         logger.exception("Failed to update segment text for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/reorder-segments")
+async def api_reorder_segments(project_id: str, payload: Dict[str, Any] = Body(...)):
+    try:
+        segment_orders = payload.get("segment_orders")
+
+        if not segment_orders:
+            raise HTTPException(status_code=400, detail="segment_orders is required")
+
+        from ai_shorts_maker.translator import reorder_project_segments
+
+        project = await run_in_threadpool(reorder_project_segments, project_id, segment_orders)
+        return project
+
+    except Exception as exc:
+        logger.exception("Failed to reorder segments for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/reset-to-translated")
+async def api_reset_to_translated(project_id: str):
+    try:
+        from ai_shorts_maker.translator import reset_project_to_translated
+
+        project = await run_in_threadpool(reset_project_to_translated, project_id)
+        return project
+
+    except Exception as exc:
+        logger.exception("Failed to reset project %s to translated state", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

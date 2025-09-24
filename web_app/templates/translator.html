@@ -52,8 +52,8 @@
                 <div id="selected-source-info" class="source-info">
                     <div class="source-details">
                         <h4 id="selected-source-title">선택된 소스</h4>
-                        <p><strong>영상:</strong> <span id="selected-video-name"></span></p>
-                        <p><strong>자막:</strong> <span id="selected-subtitle-name"></span></p>
+                        <p><strong>영상:</strong> <span id="selected-video-name">선택되지 않음</span></p>
+                        <p><strong>자막:</strong> <span id="selected-subtitle-name">선택되지 않음</span></p>
                     </div>
                 </div>
                 <div class="ai-commentary-controls">
@@ -271,6 +271,15 @@
             projectTitle.textContent = project.base_name;
             projectStatus.textContent = `상태: ${project.status}`;
 
+            // Reconstruct selectedSource from project data
+            if (project.source_video) {
+                selectedSource = {
+                    video_path: project.source_video,
+                    subtitle_path: project.source_subtitle,
+                    base_name: project.base_name
+                };
+            }
+
             projectActions.innerHTML = ''; // Clear actions
 
             // Always show delete button
@@ -290,6 +299,15 @@
                 translateBtn.textContent = '번역 실행';
                 translateBtn.addEventListener('click', runTranslation);
                 projectActions.appendChild(translateBtn);
+
+                const commentaryBtn = document.createElement('button');
+                commentaryBtn.id = 'korean-commentary-btn';
+                commentaryBtn.className = 'btn-secondary';
+                commentaryBtn.textContent = '한국어 AI 해설 넣기';
+                commentaryBtn.style.background = '#28a745';
+                commentaryBtn.style.color = 'white';
+                commentaryBtn.addEventListener('click', generateKoreanCommentary);
+                projectActions.appendChild(commentaryBtn);
             } else if (project.status === 'voice_ready') {
                 // Voice synthesis mode selector
                 const voiceModeDiv = document.createElement('div');
@@ -332,22 +350,68 @@
                 reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
                 projectActions.appendChild(reverseTranslateAllBtn);
             } else if (project.status === 'voice_complete') {
+                // Voice synthesis mode selector (keep it for re-generation)
+                const voiceModeDiv = document.createElement('div');
+                voiceModeDiv.style.display = 'flex';
+                voiceModeDiv.style.alignItems = 'center';
+                voiceModeDiv.style.gap = '10px';
+                voiceModeDiv.style.marginBottom = '10px';
+
+                const voiceModeLabel = document.createElement('label');
+                voiceModeLabel.textContent = '음성 합성 대상:';
+                voiceModeLabel.style.fontWeight = 'bold';
+
+                const voiceModeSelect = document.createElement('select');
+                voiceModeSelect.id = 'voice-synthesis-mode';
+                voiceModeSelect.innerHTML = `
+                    <option value="subtitle" ${project.voice_synthesis_mode === 'subtitle' ? 'selected' : ''}>자막만</option>
+                    <option value="commentary" ${project.voice_synthesis_mode === 'commentary' ? 'selected' : ''}>해설만</option>
+                    <option value="both" ${project.voice_synthesis_mode === 'both' ? 'selected' : ''}>자막+해설</option>
+                `;
+                voiceModeSelect.addEventListener('change', updateVoiceSynthesisMode);
+
+                voiceModeDiv.appendChild(voiceModeLabel);
+                voiceModeDiv.appendChild(voiceModeSelect);
+                projectActions.appendChild(voiceModeDiv);
+
+                const editBtn = document.createElement('button');
+                editBtn.id = 'edit-btn';
+                editBtn.className = 'btn-secondary';
+                editBtn.textContent = '편집 모드로 돌아가기';
+                editBtn.addEventListener('click', () => {
+                    // Reset project status to allow editing
+                    fetch(`/api/translator/projects/${currentProject.id}/reset-to-translated`, {
+                        method: 'POST'
+                    })
+                    .then(res => res.ok ? res.json() : Promise.reject(res))
+                    .then(renderProject)
+                    .catch(err => {
+                        console.error(err);
+                        alert('편집 모드 전환 중 오류가 발생했습니다.');
+                    });
+                });
+                projectActions.appendChild(editBtn);
+
+                const voiceBtn = document.createElement('button');
+                voiceBtn.id = 'voice-btn';
+                voiceBtn.className = 'btn-secondary';
+                voiceBtn.textContent = '음성 재생성';
+                voiceBtn.addEventListener('click', runVoiceSynthesis);
+                projectActions.appendChild(voiceBtn);
+
+                const reverseTranslateAllBtn = document.createElement('button');
+                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
+                reverseTranslateAllBtn.className = 'btn-secondary';
+                reverseTranslateAllBtn.textContent = '전체 역번역';
+                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
+                projectActions.appendChild(reverseTranslateAllBtn);
+
                 const renderBtn = document.createElement('button');
                 renderBtn.id = 'render-btn';
                 renderBtn.className = 'btn-primary';
                 renderBtn.textContent = '비디오 렌더링';
                 renderBtn.addEventListener('click', runRender);
                 projectActions.appendChild(renderBtn);
-
-                const reverseTranslateAllBtn = document.createElement('button');
-                reverseTranslateAllBtn.id = 'reverse-translate-all-btn';
-                reverseTranslateAllBtn.className = 'btn-secondary';
-                reverseTranslateAllBtn.style.background = 'rgba(255, 209, 102, 0.15)';
-                reverseTranslateAllBtn.style.border = '1px solid rgba(255, 209, 102, 0.6)';
-                reverseTranslateAllBtn.style.color = '#ffd166';
-                reverseTranslateAllBtn.textContent = '전체 역번역';
-                reverseTranslateAllBtn.addEventListener('click', runReverseTranslateAll);
-                projectActions.appendChild(reverseTranslateAllBtn);
             }
 
             const segmentsHtml = project.segments.map((seg, index) => `
@@ -366,6 +430,8 @@
                             </div>
                         </div>
                         <div class="segment-actions">
+                            <button class="btn-move-up" data-segment-id="${seg.id}" title="위로 이동">⬆️</button>
+                            <button class="btn-move-down" data-segment-id="${seg.id}" title="아래로 이동">⬇️</button>
                             <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
                             <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
                         </div>
@@ -412,15 +478,41 @@
                                     <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
                             </div>
-                            <div class="text-row commentary">
-                                <label>해설/코멘터리:</label>
-                                <div class="text-content" data-type="commentary" data-segment-id="${seg.id}">
-                                    <span class="text-display">${seg.commentary || ''}</span>
-                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary || '').replace(/"/g, '&quot;')}</textarea>
+                            <div class="text-row commentary korean">
+                                <label>해설 한국어:</label>
+                                <div class="text-content" data-type="commentary_korean" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_korean || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_korean || '').replace(/"/g, '&quot;')}</textarea>
                                     <div class="text-buttons">
-                                        <button class="btn-edit-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 수정">수정</button>
-                                        <button class="btn-copy-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 복사">복사</button>
-                                        <button class="btn-delete-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 삭제">삭제</button>
+                                        <button class="btn-edit-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_korean" data-segment-id="${seg.id}" title="해설 한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary japanese">
+                                <label>해설 일본어:</label>
+                                <div class="text-content" data-type="commentary_japanese" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_japanese || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_japanese || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_japanese" data-segment-id="${seg.id}" title="해설 일본어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary reverse">
+                                <label>해설 역번역 한국어:</label>
+                                <div class="text-content" data-type="commentary_reverse_korean" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary_reverse_korean || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary_reverse_korean || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary_reverse_korean" data-segment-id="${seg.id}" title="해설 역번역 한국어 삭제">삭제</button>
                                     </div>
                                     <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
@@ -434,6 +526,9 @@
             // Add event listeners for edit/delete buttons
             attachSegmentEventListeners();
             attachTimeEditListeners();
+
+            // Update AI commentary section with selected source info
+            showAICommentarySection();
         }
 
         function runTranslation() {
@@ -735,6 +830,22 @@
                     }
                 });
             });
+
+            // Move up buttons
+            document.querySelectorAll('.btn-move-up').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    moveSegment(segmentId, 'up');
+                });
+            });
+
+            // Move down buttons
+            document.querySelectorAll('.btn-move-down').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    moveSegment(segmentId, 'down');
+                });
+            });
         }
 
         function updateSegmentText(segmentId, textType, newText) {
@@ -762,6 +873,67 @@
             .catch(err => {
                 console.error('Failed to update segment text:', err);
                 alert('텍스트 업데이트에 실패했습니다.');
+            });
+        }
+
+        function moveSegment(segmentId, direction) {
+            const segments = currentProject.segments;
+            const currentIndex = segments.findIndex(seg => seg.id === segmentId);
+
+            if (currentIndex === -1) {
+                console.error('Segment not found:', segmentId);
+                return;
+            }
+
+            let newIndex;
+            if (direction === 'up' && currentIndex > 0) {
+                newIndex = currentIndex - 1;
+            } else if (direction === 'down' && currentIndex < segments.length - 1) {
+                newIndex = currentIndex + 1;
+            } else {
+                // Cannot move - already at boundary
+                return;
+            }
+
+            // Swap segments in the array
+            const segmentToMove = segments[currentIndex];
+            const segmentAtTarget = segments[newIndex];
+
+            segments[currentIndex] = segmentAtTarget;
+            segments[newIndex] = segmentToMove;
+
+            // Update clip_index values to maintain order
+            segments.forEach((seg, index) => {
+                seg.clip_index = index;
+            });
+
+            // Save the reordered segments to the server
+            fetch(`/api/translator/projects/${currentProject.id}/reorder-segments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    segment_orders: segments.map((seg, index) => ({
+                        segment_id: seg.id,
+                        new_index: index
+                    }))
+                })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                // Re-render the project to show the new order
+                renderProject(currentProject);
+            })
+            .catch(err => {
+                console.error('Failed to reorder segments:', err);
+                alert('세그먼트 순서 변경에 실패했습니다.');
+                // Revert the local changes
+                segments[newIndex] = segmentToMove;
+                segments[currentIndex] = segmentAtTarget;
             });
         }
 
@@ -951,21 +1123,27 @@
         }
 
         function showAICommentarySection() {
-            if (!selectedSource) return;
-
             const aiCommentarySection = document.getElementById('ai-commentary-section');
             const translationSettingsSection = document.getElementById('translation-settings-section');
 
             // Show AI commentary section
             aiCommentarySection.style.display = 'block';
 
-            // Ensure translation settings section stays hidden until needed
-            translationSettingsSection.style.display = 'none';
+            // Keep translation settings section visible
+            translationSettingsSection.style.display = 'block';
 
-            // Update selected source info
-            document.getElementById('selected-video-name').textContent = selectedSource.base_name;
-            document.getElementById('selected-subtitle-name').textContent =
-                selectedSource.subtitle_path ? selectedSource.subtitle_path.split('/').pop() : '자막 없음';
+            // Update selected source info if selectedSource is available
+            const videoNameElem = document.getElementById('selected-video-name');
+            const subtitleNameElem = document.getElementById('selected-subtitle-name');
+
+            if (selectedSource) {
+                videoNameElem.textContent = selectedSource.base_name || '';
+                subtitleNameElem.textContent = selectedSource.subtitle_path ? selectedSource.subtitle_path.split('/').pop() : '자막 없음';
+            } else {
+                // If no selectedSource, show placeholder text
+                videoNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
+                subtitleNameElem.textContent = '프로젝트에서 소스 정보를 가져오는 중...';
+            }
 
             // Scroll to AI commentary section with a slight delay for better UX
             setTimeout(() => {
@@ -975,6 +1153,9 @@
                 });
             }, 100);
         }
+
+        // Make function globally accessible for debugging
+        window.showAICommentarySection = showAICommentarySection;
 
         function showTranslationSettings() {
             const translationSettingsSection = document.getElementById('translation-settings-section');
@@ -1050,6 +1231,50 @@
 
         function skipAICommentary() {
             showTranslationSettings();
+        }
+
+        async function generateKoreanCommentary() {
+            if (!currentProject) {
+                alert('프로젝트가 로드되지 않았습니다.');
+                return;
+            }
+
+            const btn = document.getElementById('korean-commentary-btn');
+            btn.disabled = true;
+            btn.textContent = '한국어 AI 해설 생성 중...';
+
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/generate-korean-commentary`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Response details:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        url: response.url,
+                        body: errorText
+                    });
+                    throw new Error(`한국어 AI 해설 생성 실패: ${response.status} - ${response.statusText} - ${errorText}`);
+                }
+
+                const updatedProject = await response.json();
+
+                // Update current project and re-render
+                renderProject(updatedProject);
+
+                alert('한국어 AI 해설이 성공적으로 생성되었습니다!');
+
+            } catch (error) {
+                console.error('한국어 해설 생성 오류:', error);
+                alert(`한국어 AI 해설 생성 중 오류가 발생했습니다: ${error.message}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '한국어 AI 해설 넣기';
+                }
+            }
         }
 
         function deleteProject() {
@@ -1201,6 +1426,9 @@
             projectView.classList.add('hidden');
             fetchDownloads();
             loadInitialSettings();
+
+            // Show AI commentary section on initial load
+            showAICommentarySection();
         }
     })();
     </script>
