@@ -41,6 +41,7 @@ from ai_shorts_maker.services import (
     update_subtitle_style,
     update_subtitle,
 )
+from youtube.ytdl import download_with_options, parse_sub_langs
 
 
 class RenderRequest(BaseModel):
@@ -53,6 +54,9 @@ class SubtitleStyleRequest(BaseModel):
     stroke_width: Optional[int] = None
     font_path: Optional[str] = None
     animation: Optional[str] = None
+    template: Optional[str] = None
+    banner_primary_text: Optional[str] = None
+    banner_secondary_text: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,16 @@ ASSETS_DIR = PACKAGE_DIR / "assets"
 OUTPUT_DIR = PACKAGE_DIR / "outputs"
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
+YTDL_SETTINGS_PATH = BASE_DIR / "ytdl_settings.json"
+DEFAULT_YTDL_OUTPUT_DIR = (BASE_DIR.parent / "youtube" / "download").resolve()
+DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
+    "output_dir": str(DEFAULT_YTDL_OUTPUT_DIR),
+    "sub_langs": "ko",
+    "sub_format": "srt/best",
+    "download_subs": True,
+    "auto_subs": True,
+    "dry_run": False,
+}
 
 LANG_OPTIONS: List[tuple[str, str]] = [
     ("ko", "한국어"),
@@ -209,6 +223,141 @@ def api_restore_version(base_name: str, version: int) -> ProjectMetadata:
 
 
 app.include_router(api_router)
+
+
+def default_ytdl_form() -> Dict[str, Any]:
+    settings = load_ytdl_settings()
+    return {
+        "urls": "",
+        **settings,
+    }
+
+
+def load_ytdl_settings() -> Dict[str, Any]:
+    settings = DEFAULT_YTDL_SETTINGS.copy()
+    if YTDL_SETTINGS_PATH.exists():
+        try:
+            data = json.loads(YTDL_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if key in settings:
+                        if isinstance(settings[key], bool):
+                            settings[key] = bool(value)
+                        else:
+                            settings[key] = value
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load YTDL settings: %s", exc)
+    return settings
+
+
+def save_ytdl_settings(values: Dict[str, Any]) -> None:
+    payload = {}
+    for key in DEFAULT_YTDL_SETTINGS:
+        if key not in values:
+            continue
+        original = DEFAULT_YTDL_SETTINGS[key]
+        value = values[key]
+        if isinstance(original, bool):
+            payload[key] = bool(value)
+        else:
+            payload[key] = value
+    try:
+        YTDL_SETTINGS_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Failed to save YTDL settings: %s", exc)
+
+
+def _split_urls(raw: str) -> List[str]:
+    return [line.strip() for line in raw.replace("\r", "\n").splitlines() if line.strip()]
+
+
+@app.get("/ytdl", response_class=HTMLResponse)
+async def ytdl_index(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "form_values": default_ytdl_form(),
+        "result": None,
+        "error": None,
+        "settings_saved": False,
+    }
+    return templates.TemplateResponse("ytdl.html", context)
+
+
+@app.post("/ytdl", response_class=HTMLResponse)
+async def ytdl_download(
+    request: Request,
+    urls: str = Form(""),
+    output_dir: str = Form(""),
+    sub_langs: str = Form("ko"),
+    sub_format: str = Form("srt/best"),
+    download_subs: Optional[str] = Form("on"),
+    auto_subs: Optional[str] = Form("on"),
+    dry_run: Optional[str] = Form(None),
+    save_settings: Optional[str] = Form(None),
+) -> HTMLResponse:
+    download_subs_enabled = download_subs is not None
+    auto_subs_enabled = auto_subs is not None
+    dry_run_enabled = dry_run is not None
+
+    form_values = {
+        "urls": urls,
+        "output_dir": output_dir,
+        "sub_langs": sub_langs,
+        "sub_format": sub_format,
+        "download_subs": download_subs_enabled,
+        "auto_subs": auto_subs_enabled,
+        "dry_run": dry_run_enabled,
+    }
+
+    settings_saved = False
+    if save_settings is not None:
+        settings_payload = {key: value for key, value in form_values.items() if key != "urls"}
+        try:
+            save_ytdl_settings(settings_payload)
+            settings_saved = True
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Failed to save YTDL settings: %s", exc)
+
+    parsed_urls = _split_urls(urls)
+    error = None
+    result: Optional[Dict[str, Any]] = None
+
+    if parsed_urls:
+        try:
+            selected_langs = parse_sub_langs(sub_langs)
+            files = await run_in_threadpool(
+                download_with_options,
+                parsed_urls,
+                output_dir or None,
+                skip_download=dry_run_enabled,
+                download_subs=download_subs_enabled,
+                auto_subs=auto_subs_enabled,
+                sub_langs=sub_langs,
+                sub_format=sub_format,
+            )
+            result = {
+                "files": [str(path) for path in files],
+                "count": len(files),
+                "langs": selected_langs,
+                "dry_run": dry_run_enabled,
+            }
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("YT download error: %s", exc)
+            error = str(exc)
+    elif not settings_saved:
+        error = "최소 하나의 유효한 URL을 입력하세요."
+
+    context = {
+        "request": request,
+        "form_values": form_values,
+        "error": error,
+        "result": result,
+        "settings_saved": settings_saved,
+    }
+    return templates.TemplateResponse("ytdl.html", context)
 
 
 @app.get("/", response_class=HTMLResponse)

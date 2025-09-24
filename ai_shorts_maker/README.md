@@ -23,6 +23,7 @@ pip install -r requirements.txt
 cp .env.example .env && sed -i 's/sk-proj-.../YOUR_KEY/' .env  # 또는 수동 편집
 ```
 
+
 기본 에셋 폴더 구조는 자동으로 생성됩니다.
 
 ```
@@ -34,6 +35,13 @@ ai_shorts_maker/
 ```
 
 ## 사용 예시
+
+### 실행 명령 한눈에 보기
+
+| 용도 | 명령어 |
+| --- | --- |
+| CLI로 바로 쇼츠 생성 | `python shorts_maker.py --topic "무서운 썰" --style "공포/미스터리" --duration 30 --lang ko --voice alloy` |
+| FastAPI 웹 UI 실행 | `uvicorn web_app.app:app --reload` |
 
 ```bash
 python shorts_maker.py \

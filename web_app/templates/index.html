@@ -9,6 +9,9 @@
 <body>
 <div class="container">
     <h1>AI 쇼츠 제작기</h1>
+    <nav class="nav-links">
+        <a href="/ytdl">유튜브 다운로드 도구로 이동</a>
+    </nav>
 
     <section class="panel">
         <h2>새 프로젝트 생성</h2>
@@ -255,6 +258,16 @@
             <label>Y 오프셋 <input type="number" step="1" id="subtitle-y-offset" placeholder="0"></label>
             <label>외곽선 두께 <input type="number" min="0" max="10" id="subtitle-stroke-width" placeholder="2"></label>
             <label>폰트 경로 <input type="text" id="subtitle-font-path" placeholder="예: /usr/share/fonts/..." autocomplete="off"></label>
+            <label>레이아웃 템플릿
+                <select id="subtitle-template">
+                    <option value="classic">1. 기본 템플릿</option>
+                    <option value="banner">2. 하이라이트 배너</option>
+                </select>
+            </label>
+            <div id="banner-text-wrapper" class="banner-text-wrapper is-hidden">
+                <label>배너 첫 줄 텍스트 <input type="text" id="banner-primary-text" placeholder="예: 모두를 놀라게 한" autocomplete="off"></label>
+                <label>배너 둘째 줄 텍스트 <input type="text" id="banner-secondary-text" placeholder="예: 레전드 시상식 공연" autocomplete="off"></label>
+            </div>
             <label>애니메이션
                 <select id="subtitle-animation">
                     <option value="none">없음</option>
@@ -293,6 +306,18 @@ function showMessage(text, type = 'info') {
     if (!messageBox) return;
     messageBox.textContent = text;
     messageBox.className = type;
+}
+
+function updateBannerVisibility() {
+    const wrapper = document.getElementById('banner-text-wrapper');
+    const templateSelect = document.getElementById('subtitle-template');
+    if (!wrapper) return;
+    const shouldShow = !!templateSelect && templateSelect.value === 'banner';
+    wrapper.classList.toggle('is-hidden', !shouldShow);
+    const primaryInput = document.getElementById('banner-primary-text');
+    const secondaryInput = document.getElementById('banner-secondary-text');
+    if (primaryInput) primaryInput.disabled = !shouldShow;
+    if (secondaryInput) secondaryInput.disabled = !shouldShow;
 }
 
 {% if result %}
@@ -766,6 +791,9 @@ async function updateSubtitleStyle(baseName) {
     const strokeWidth = parseInt(document.getElementById('subtitle-stroke-width').value, 10);
     const fontPathInput = document.getElementById('subtitle-font-path');
     const animationSelect = document.getElementById('subtitle-animation');
+    const templateSelect = document.getElementById('subtitle-template');
+    const bannerPrimaryInput = document.getElementById('banner-primary-text');
+    const bannerSecondaryInput = document.getElementById('banner-secondary-text');
 
     const payload = {};
     if (!Number.isNaN(fontSize)) payload.font_size = fontSize;
@@ -783,6 +811,27 @@ async function updateSubtitleStyle(baseName) {
         const initialAnimation = animationSelect.dataset.initial ?? 'none';
         if (currentAnimation !== initialAnimation) {
             payload.animation = currentAnimation;
+        }
+    }
+    if (templateSelect) {
+        const currentTemplate = (templateSelect.value || 'classic');
+        const initialTemplate = templateSelect.dataset.initial ?? 'classic';
+        if (currentTemplate !== initialTemplate) {
+            payload.template = currentTemplate;
+        }
+    }
+    if (bannerPrimaryInput) {
+        const currentPrimary = bannerPrimaryInput.value.trim();
+        const initialPrimary = bannerPrimaryInput.dataset.initial ?? '';
+        if (currentPrimary !== initialPrimary) {
+            payload.banner_primary_text = currentPrimary;
+        }
+    }
+    if (bannerSecondaryInput) {
+        const currentSecondary = bannerSecondaryInput.value.trim();
+        const initialSecondary = bannerSecondaryInput.dataset.initial ?? '';
+        if (currentSecondary !== initialSecondary) {
+            payload.banner_secondary_text = currentSecondary;
         }
     }
 
@@ -953,6 +1002,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const strokeWidthInput = document.getElementById('subtitle-stroke-width');
         const fontPathInput = document.getElementById('subtitle-font-path');
         const animationSelect = document.getElementById('subtitle-animation');
+        const templateSelect = document.getElementById('subtitle-template');
+        const bannerPrimaryInput = document.getElementById('banner-primary-text');
+        const bannerSecondaryInput = document.getElementById('banner-secondary-text');
         if (fontSizeInput) fontSizeInput.value = style.font_size ?? 62;
         if (yOffsetInput) yOffsetInput.value = style.y_offset ?? 0;
         if (strokeWidthInput) strokeWidthInput.value = style.stroke_width ?? 2;
@@ -966,6 +1018,23 @@ window.addEventListener('DOMContentLoaded', () => {
             animationSelect.value = animationValue;
             animationSelect.dataset.initial = animationValue;
         }
+        if (templateSelect) {
+            const templateValue = (style.template ?? 'classic').toLowerCase();
+            templateSelect.value = templateValue;
+            templateSelect.dataset.initial = templateValue;
+            templateSelect.addEventListener('change', updateBannerVisibility);
+        }
+        if (bannerPrimaryInput) {
+            const primaryText = style.banner_primary_text ?? '';
+            bannerPrimaryInput.value = primaryText;
+            bannerPrimaryInput.dataset.initial = primaryText;
+        }
+        if (bannerSecondaryInput) {
+            const secondaryText = style.banner_secondary_text ?? '';
+            bannerSecondaryInput.value = secondaryText;
+            bannerSecondaryInput.dataset.initial = secondaryText;
+        }
+        updateBannerVisibility();
         addInitialVersionList();
         refreshVersionHistory(projectData.base_name);
         initWaveform();
@@ -986,6 +1055,23 @@ window.addEventListener('DOMContentLoaded', () => {
             animationSelect.value = 'none';
             animationSelect.dataset.initial = 'none';
         }
+        const templateSelect = document.getElementById('subtitle-template');
+        if (templateSelect) {
+            templateSelect.value = 'classic';
+            templateSelect.dataset.initial = 'classic';
+            templateSelect.addEventListener('change', updateBannerVisibility);
+        }
+        const bannerPrimaryInput = document.getElementById('banner-primary-text');
+        const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+        if (bannerPrimaryInput) {
+            bannerPrimaryInput.value = '';
+            bannerPrimaryInput.dataset.initial = '';
+        }
+        if (bannerSecondaryInput) {
+            bannerSecondaryInput.value = '';
+            bannerSecondaryInput.dataset.initial = '';
+        }
+        updateBannerVisibility();
         setAutoControls('segment', {}, true);
         setAutoControls('new', {}, true);
     }

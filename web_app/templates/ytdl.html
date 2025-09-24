@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>유튜브 다운로드 도구</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <h1>유튜브 다운로드 도구</h1>
+        <nav>
+            <a href="/">AI 쇼츠 메이커로 돌아가기</a>
+        </nav>
+    </header>
+
+    <section class="panel">
+        <h2>다운로드 설정</h2>
+        <form method="post" action="/ytdl" class="ytdl-form">
+            <div class="field">
+                <label for="urls">유튜브 URL (여러 줄 입력 가능)</label>
+                <textarea id="urls" name="urls" rows="4">{{ form_values.urls }}</textarea>
+            </div>
+            <div class="field inline">
+                <label for="output_dir">저장 폴더</label>
+                <input type="text" id="output_dir" name="output_dir" placeholder="현재 디렉터리" value="{{ form_values.output_dir }}">
+                <label for="sub_langs">자막 언어</label>
+                <input type="text" id="sub_langs" name="sub_langs" value="{{ form_values.sub_langs }}" placeholder="예: ko,en">
+                <label for="sub_format">자막 형식</label>
+                <input type="text" id="sub_format" name="sub_format" value="{{ form_values.sub_format }}">
+            </div>
+            <div class="field inline">
+                <label><input type="checkbox" name="download_subs" {% if form_values.download_subs %}checked{% endif %}> 자막 다운로드</label>
+                <label><input type="checkbox" name="auto_subs" {% if form_values.auto_subs %}checked{% endif %}> 자동 생성 자막 포함</label>
+                <label><input type="checkbox" name="dry_run" {% if form_values.dry_run %}checked{% endif %}> 드라이런(미리보기)</label>
+                <label><input type="checkbox" name="save_settings"> 현재 상태를 기본값으로 저장</label>
+            </div>
+            <button type="submit">실행</button>
+        </form>
+    </section>
+
+    {% if settings_saved %}
+    <div class="alert success">
+        현재 설정을 기본값으로 저장했습니다.
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert error">
+        <strong>오류:</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    {% if result %}
+    <section class="panel">
+        <h2>결과</h2>
+        <p>
+            {% if result.dry_run %}
+            다운로드 예정 파일 ({{ result.count }}개)
+            {% else %}
+            다운로드 완료 파일 ({{ result.count }}개)
+            {% endif %}
+        </p>
+        <p>자막 언어: {{ result.langs | join(", ") }}</p>
+        <ul class="file-list">
+            {% for item in result.files %}
+            <li><code>{{ item }}</code></li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    <section class="panel info">
+        <h2>사용 팁</h2>
+        <ul>
+            <li>`자막 언어`에 `ko,en`처럼 콤마로 구분하면 여러 언어를 받을 수 있습니다.</li>
+            <li>영상 없이 자막만 확인하려면 `드라이런`을 체크하세요.</li>
+            <li>`자동 생성 자막 포함`을 해제하면 업로드된 자막만 내려받습니다.</li>
+        </ul>
+    </section>
+</div>
+</body>
+</html>

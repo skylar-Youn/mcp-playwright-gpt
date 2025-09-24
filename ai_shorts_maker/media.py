@@ -6,6 +6,7 @@ import logging
 import math
 import os
 import random
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -323,6 +324,9 @@ class MediaFactory:
         subtitle_y_offset: int = 0,
         subtitle_stroke_width: int = 2,
         subtitle_animation: str = "none",
+        layout_template: str = "classic",
+        banner_primary: Optional[str] = None,
+        banner_secondary: Optional[str] = None,
     ) -> None:
         self.assets_dir = assets_dir
         self.broll_dir = assets_dir / "broll"
@@ -334,6 +338,9 @@ class MediaFactory:
         self.subtitle_y_offset = subtitle_y_offset
         self.subtitle_stroke_width = subtitle_stroke_width
         self.subtitle_animation = (subtitle_animation or "none").lower()
+        self.layout_template = (layout_template or "classic").lower()
+        self.banner_primary_text = banner_primary
+        self.banner_secondary_text = banner_secondary
 
     # -------------------- B-roll --------------------
     def build_broll_clip(self, duration: float):
@@ -458,17 +465,33 @@ class MediaFactory:
 
         animation_mode = self.subtitle_animation
         durations = [max(cap.end - cap.start, 0.1) for cap in captions]
-        duration_index = 0
+        timings = [(cap.start, cap.end) for cap in captions]
+        caption_lookup: dict[str, deque[tuple[float, float, float]]] = defaultdict(deque)
+        for cap in captions:
+            caption_lookup[cap.text].append(
+                (max(cap.end - cap.start, 0.1), cap.start, cap.end)
+            )
+        if durations:
+            default_duration = durations[-1]
+            default_start, default_end = timings[-1]
+        else:
+            default_duration = 1.5
+            default_start, default_end = 0.0, 1.5
         base_y = self.canvas_size[1] - 250 - self.subtitle_y_offset
+        banner_enabled = self.layout_template == "banner"
+        banner_height = int(self.canvas_size[1] * 0.21) if banner_enabled else 0
+        if banner_enabled:
+            base_y = self.canvas_size[1] - 300 - self.subtitle_y_offset
         slide_modes = {"slide_up", "slide_down", "slide_left", "slide_right"}
 
-        def _next_duration() -> float:
-            nonlocal duration_index
-            if duration_index < len(durations):
-                value = durations[duration_index]
-                duration_index += 1
-                return value
-            return durations[-1] if durations else 1.5
+        def _caption_meta(text: str) -> tuple[float, float, float]:
+            queue = caption_lookup.get(text)
+            if queue:
+                try:
+                    return queue.popleft()
+                except IndexError:
+                    pass
+            return default_duration, default_start, default_end
 
         def _create_text_clip(txt: str):
             base_kwargs = dict(
@@ -494,7 +517,8 @@ class MediaFactory:
             return clip
 
         def generator(txt):
-            duration = max(_next_duration(), 0.1)
+            raw_duration, start_time, _ = _caption_meta(txt)
+            duration = max(raw_duration, 0.1)
             clip = _set_duration(_create_text_clip(txt), duration + 0.05)
             if hasattr(clip, "with_mask"):
                 clip = clip.with_mask()
@@ -511,7 +535,8 @@ class MediaFactory:
                 offset_x = self.canvas_size[0] * 0.12
 
                 def pos_func(t: float):
-                    progress = min(max(t / 0.25, 0.0), 1.0)
+                    local_t = max(0.0, t - start_time)
+                    progress = min(max(local_t / 0.25, 0.0), 1.0)
                     slide = 1.0 - progress
                     if animation_mode == "slide_up":
                         return ("center", base_y + offset_y * slide)
@@ -534,7 +559,8 @@ class MediaFactory:
                 def bounce_position(t: float):
                     if duration <= 0:
                         return ("center", base_y)
-                    progress = max(0.0, min(t / duration, 1.0))
+                    local_t = max(0.0, t - start_time)
+                    progress = max(0.0, min(local_t / duration, 1.0))
                     bounce = math.sin(progress * math.pi * 2.2)
                     decay = math.exp(-2.2 * progress)
                     return ("center", base_y - amplitude * bounce * decay)
@@ -547,7 +573,8 @@ class MediaFactory:
 
                 def make_typewriter_frame(t: float):
                     frame = base_frame.copy()
-                    progress = max(0.0, min(t / max(duration, 1e-3), 1.0))
+                    local_t = max(0.0, t - start_time)
+                    progress = max(0.0, min(local_t / max(duration, 1e-3), 1.0))
                     cutoff = int(total_w * progress)
                     if cutoff < frame.shape[1]:
                         frame[:, cutoff:, ...] = 0
@@ -559,7 +586,8 @@ class MediaFactory:
 
                     def make_typewriter_mask(t: float):
                         mask = mask_frame.copy()
-                        progress = max(0.0, min(t / max(duration, 1e-3), 1.0))
+                        local_t = max(0.0, t - start_time)
+                        progress = max(0.0, min(local_t / max(duration, 1e-3), 1.0))
                         cutoff = int(total_mask_w * progress)
                         if cutoff < mask.shape[1]:
                             mask[:, cutoff:] = 0
@@ -592,8 +620,9 @@ class MediaFactory:
                 if base_frame is None:
                     base_frame = clip.get_frame(0)
                 def make_fire_frame(t: float):
+                    local_t = max(0.0, t - start_time)
                     frame = base_frame.astype(np.float32).copy()
-                    flicker = 0.6 + 0.4 * math.sin(t * 8.5)
+                    flicker = 0.6 + 0.4 * math.sin(local_t * 8.5)
                     warm = np.array([1.0, 0.55 + 0.35 * flicker, 0.25 + 0.2 * flicker], dtype=np.float32)
                     frame *= warm
                     return np.clip(frame, 0, 255).astype(np.uint8)
@@ -612,5 +641,51 @@ class MediaFactory:
         video_duration = getattr(video_clip, "duration", None)
         if video_duration is not None:
             subtitles_clip = _set_duration(subtitles_clip, video_duration)
-        composite = CompositeVideoClip([video_clip, subtitles_clip])
+        layers = [video_clip, subtitles_clip]
+
+        if banner_enabled:
+            duration_target = video_duration or subtitles_clip.duration
+            banner_bg = ColorClip(size=(self.canvas_size[0], banner_height), color=(0, 0, 0))
+            banner_bg = _set_duration(banner_bg, duration_target)
+            if hasattr(banner_bg, "with_opacity"):
+                banner_bg = banner_bg.with_opacity(0.92)
+            banner_bg = _with_position(banner_bg, ("center", 0))
+
+            def _banner_text_clip(text: Optional[str], *, color: str, y_factor: float) -> Optional[VideoClip]:
+                if not text:
+                    return None
+                base_kwargs = dict(
+                    color=color,
+                    method="caption",
+                    size=(self.canvas_size[0] - 160, None),
+                    stroke_color="black",
+                    stroke_width=max(2, self.subtitle_stroke_width + 1),
+                )
+
+                def _make_kwargs(include_font: bool):
+                    kwargs = dict(base_kwargs)
+                    kwargs[_TEXT_PARAM] = text
+                    kwargs[_FONT_SIZE_PARAM] = max(int(self.subtitle_fontsize * 1.05), 48)
+                    if include_font and self.subtitle_font:
+                        kwargs["font"] = self.subtitle_font
+                    return kwargs
+
+                try:
+                    clip = TextClip(**_make_kwargs(include_font=True))
+                except Exception:
+                    clip = TextClip(**_make_kwargs(include_font=False))
+                clip = _set_duration(clip, duration_target)
+                y_pos = max(8, int(banner_height * y_factor) - clip.h // 2)
+                return _with_position(clip, ("center", y_pos))
+
+            primary_text = _banner_text_clip(self.banner_primary_text, color="white", y_factor=0.35)
+            secondary_text = _banner_text_clip(self.banner_secondary_text, color="#ffd400", y_factor=0.72)
+
+            layers.append(banner_bg)
+            if primary_text is not None:
+                layers.append(primary_text)
+            if secondary_text is not None:
+                layers.append(secondary_text)
+
+        composite = CompositeVideoClip(layers, size=self.canvas_size)
         return _set_duration(composite, video_duration or subtitles_clip.duration)

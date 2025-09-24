@@ -67,6 +67,9 @@ class SubtitleStyle(BaseModel):
     stroke_width: int = Field(default=2, ge=0, le=10)
     font_path: Optional[str] = None
     animation: str = Field(default="none")
+    template: str = Field(default="classic")
+    banner_primary_text: Optional[str] = None
+    banner_secondary_text: Optional[str] = None
 
 
 class ProjectMetadata(BaseModel):

@@ -20,6 +20,11 @@ except ModuleNotFoundError:  # pragma: no cover
     from moviepy import ImageClip  # type: ignore
 
 try:
+    from PIL import Image
+except ImportError:  # pragma: no cover
+    Image = None  # type: ignore
+
+try:
     from moviepy.video.fx.Resize import Resize as ResizeEffect
 except ImportError:  # pragma: no cover - legacy moviepy
     ResizeEffect = None
@@ -202,6 +207,9 @@ def update_subtitle_style(
     stroke_width: Optional[int] = None,
     font_path: Optional[str] | object = UNSET,
     animation: Optional[str] = None,
+    template: Optional[str] = None,
+    banner_primary_text: Optional[str] = None,
+    banner_secondary_text: Optional[str] = None,
 ) -> ProjectMetadata:
     metadata = load_project(base_name)
     style = metadata.subtitle_style
@@ -215,6 +223,12 @@ def update_subtitle_style(
         style.font_path = (font_path or None)
     if animation is not None:
         style.animation = animation
+    if template is not None:
+        style.template = template
+    if banner_primary_text is not None:
+        style.banner_primary_text = banner_primary_text
+    if banner_secondary_text is not None:
+        style.banner_secondary_text = banner_secondary_text
     _touch(metadata)
     return save_project(metadata)
 
@@ -357,6 +371,30 @@ def _auto_motion_parameters(
     }
 
 
+def _load_image_clip(path: Path) -> ImageClip:
+    """Load an image clip from disk with a Pillow fallback."""
+
+    try:
+        return ImageClip(str(path))
+    except (OSError, ValueError, RuntimeError) as original_exc:
+        if Image is None:
+            raise
+        try:
+            with Image.open(path) as img:
+                # Ensure consistent color mode
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                else:
+                    img = img.copy()
+        except Exception as pillow_exc:  # pragma: no cover - fallback failure
+            raise original_exc from pillow_exc
+
+        import numpy as np  # Local import to avoid mandatory dependency if unused
+
+        frame = np.array(img)
+        return ImageClip(frame)
+
+
 def _segment_to_clip(
     segment: TimelineSegment,
     factory: MediaFactory,
@@ -373,8 +411,8 @@ def _segment_to_clip(
             if path.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}:
                 clip = VideoFileClip(str(path))
             elif path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
-                clip = ImageClip(str(path))
-        except OSError:
+                clip = _load_image_clip(path)
+        except (OSError, ValueError, RuntimeError):
             clip = None
 
     if clip is None:
@@ -636,9 +674,14 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
         subtitle_y_offset=style.y_offset,
         subtitle_stroke_width=style.stroke_width,
         subtitle_animation=style.animation,
+        layout_template=style.template,
+        banner_primary=style.banner_primary_text if style.banner_primary_text is not None else metadata.topic,
+        banner_secondary=style.banner_secondary_text if style.banner_secondary_text is not None else metadata.style,
     )
     if style.font_path != factory.subtitle_font:
         style.font_path = factory.subtitle_font
+    if style.template != factory.layout_template:
+        style.template = factory.layout_template
 
     base_segments = [seg for seg in timeline_segments if not _is_overlay(seg)]
     overlay_segments = [seg for seg in timeline_segments if _is_overlay(seg)]
