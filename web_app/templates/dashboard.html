@@ -89,6 +89,12 @@
                 return `<span class="dot${active}"></span>`;
             }).join('');
 
+            // 디버깅용 로그
+            console.log('Project:', item.id, 'Type:', item.project_type, 'Steps:', item.completed_steps);
+
+            // 영상편집 버튼 조건 확인 (번역 완료된 프로젝트)
+            const showVideoEditButton = item.project_type === 'translator' && item.completed_steps >= 2;
+
             return `
                 <a class="project-card" href="${projectLink(item)}" data-title="${safeTitle.toLowerCase()}">
                     <div class="thumbnail">
@@ -100,6 +106,11 @@
                         <p class="project-status">상태: ${safeStatus}</p>
                         <div class="progress-dots">${dots}</div>
                         <p class="project-updated">업데이트: ${updatedAt || '미기록'}</p>
+                        ${showVideoEditButton ?
+                            `<div class="project-actions">
+                                <button class="btn-video-edit" onclick="event.preventDefault(); openVideoEditor('${item.id}')">영상편집</button>
+                            </div>` : ''
+                        }
                     </div>
                 </a>
             `;
@@ -137,7 +148,646 @@
     });
 
     renderProjects(initialProjects);
+
+    // 영상편집 모달 관련 함수들
+    window.openVideoEditor = function(projectId) {
+        const modal = document.getElementById('video-editor-modal') || createVideoEditorModal();
+        loadProjectForEditing(projectId);
+        modal.style.display = 'flex';
+    };
+
+    function createVideoEditorModal() {
+        const modal = document.createElement('div');
+        modal.id = 'video-editor-modal';
+        modal.className = 'video-editor-modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>영상편집</h3>
+                    <button class="modal-close" onclick="closeVideoEditor()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="video-selection-section">
+                        <h4>다운로드된 영상 선택</h4>
+                        <select id="video-file-select" class="form-control">
+                            <option value="">영상을 선택하세요</option>
+                        </select>
+                        <button id="refresh-videos-btn" class="btn-outline">새로고침</button>
+                    </div>
+
+                    <div class="template-selection-section">
+                        <h4>레이아웃 템플릿 선택</h4>
+                        <div id="template-options" class="template-grid">
+                            <div class="template-option" data-template="classic">
+                                <div class="template-preview">1</div>
+                                <span>기본 템플릿</span>
+                            </div>
+                            <div class="template-option" data-template="banner">
+                                <div class="template-preview banner-preview">🏷️</div>
+                                <span>하이라이트 배너</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="subtitle-file-selection-section">
+                        <h4>자막 파일 선택</h4>
+                        <select id="subtitle-file-select" class="form-control">
+                            <option value="">자막을 선택하세요</option>
+                        </select>
+                        <button id="refresh-subtitles-btn" class="btn-outline">새로고침</button>
+                    </div>
+
+                    <div class="subtitle-selection-section">
+                        <h4>자막 유형 선택</h4>
+                        <div id="subtitle-options" class="subtitle-options">
+                            <div class="subtitle-option" data-subtitle="translated">
+                                <input type="radio" id="subtitle-translated" name="subtitle-type" value="translated" checked>
+                                <label for="subtitle-translated">번역된 자막 (일본어)</label>
+                            </div>
+                            <div class="subtitle-option" data-subtitle="original">
+                                <input type="radio" id="subtitle-original" name="subtitle-type" value="original">
+                                <label for="subtitle-original">원본 자막 (한국어)</label>
+                            </div>
+                            <div class="subtitle-option" data-subtitle="reverse">
+                                <input type="radio" id="subtitle-reverse" name="subtitle-type" value="reverse">
+                                <label for="subtitle-reverse">역번역 자막 (한국어)</label>
+                            </div>
+                            <div class="subtitle-option" data-subtitle="external">
+                                <input type="radio" id="subtitle-external" name="subtitle-type" value="external">
+                                <label for="subtitle-external">외부 자막 파일</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="subtitle-preview-section">
+                        <h4>자막 미리보기</h4>
+                        <div id="subtitle-preview" class="subtitle-preview">
+                            번역된 자막을 여기서 미리볼 수 있습니다.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="process-video-btn" class="btn-primary" disabled>영상 처리 시작</button>
+                    <button class="btn-outline" onclick="closeVideoEditor()">취소</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        setupVideoEditorEvents();
+        return modal;
+    }
+
+    function setupVideoEditorEvents() {
+        const videoSelect = document.getElementById('video-file-select');
+        const refreshBtn = document.getElementById('refresh-videos-btn');
+        const subtitleSelect = document.getElementById('subtitle-file-select');
+        const refreshSubtitlesBtn = document.getElementById('refresh-subtitles-btn');
+        const processBtn = document.getElementById('process-video-btn');
+        const templateOptions = document.querySelectorAll('.template-option');
+        const subtitleRadios = document.querySelectorAll('input[name="subtitle-type"]');
+
+        refreshBtn.addEventListener('click', loadVideoFiles);
+        refreshSubtitlesBtn.addEventListener('click', loadSubtitleFiles);
+        videoSelect.addEventListener('change', updateProcessButton);
+        subtitleSelect.addEventListener('change', updateSubtitlePreview);
+        processBtn.addEventListener('click', processVideo);
+
+        templateOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                templateOptions.forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+            });
+        });
+
+        // 자막 타입 변경 이벤트
+        subtitleRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                toggleSubtitleFileSelection();
+                updateSubtitlePreview();
+            });
+        });
+
+        // 기본 템플릿 선택
+        templateOptions[0].classList.add('selected');
+        loadVideoFiles();
+        loadSubtitleFiles();
+        toggleSubtitleFileSelection();
+    }
+
+    function loadVideoFiles() {
+        fetch('/api/translator/downloads')
+            .then(res => res.json())
+            .then(downloads => {
+                const videoSelect = document.getElementById('video-file-select');
+                videoSelect.innerHTML = '<option value="">영상을 선택하세요</option>';
+
+                console.log('Downloads response:', downloads);
+
+                // downloads는 {video_path, subtitle_path, base_name} 구조의 배열
+                downloads.forEach(download => {
+                    if (download.video_path) {
+                        const option = document.createElement('option');
+                        option.value = download.video_path;
+                        option.textContent = download.base_name;
+                        videoSelect.appendChild(option);
+                    }
+                });
+
+                console.log(`Loaded ${downloads.length} video files`);
+            })
+            .catch(err => {
+                console.error('영상 파일 로드 실패:', err);
+            });
+    }
+
+    function loadSubtitleFiles() {
+        fetch('/api/translator/downloads')
+            .then(res => res.json())
+            .then(downloads => {
+                const subtitleSelect = document.getElementById('subtitle-file-select');
+                subtitleSelect.innerHTML = '<option value="">자막을 선택하세요</option>';
+
+                console.log('Subtitle files response:', downloads);
+
+                // 자막 파일들 (.srt, .vtt, .ass 등)
+                downloads.forEach(download => {
+                    if (download.subtitle_path) {
+                        const option = document.createElement('option');
+                        option.value = download.subtitle_path;
+                        option.textContent = download.base_name;
+                        subtitleSelect.appendChild(option);
+                    }
+                });
+
+                console.log(`Loaded ${downloads.length} subtitle files`);
+            })
+            .catch(err => {
+                console.error('자막 파일 로드 실패:', err);
+            });
+    }
+
+    function toggleSubtitleFileSelection() {
+        const selectedType = document.querySelector('input[name="subtitle-type"]:checked').value;
+        const subtitleFileSection = document.querySelector('.subtitle-file-selection-section');
+
+        if (selectedType === 'external') {
+            subtitleFileSection.style.display = 'block';
+        } else {
+            subtitleFileSection.style.display = 'none';
+        }
+    }
+
+    function loadProjectForEditing(projectId) {
+        window.currentProjectId = projectId;
+        // 프로젝트의 번역된 자막 로드
+        fetch(`/api/translator/projects/${projectId}`)
+            .then(res => res.json())
+            .then(project => {
+                console.log('Project loaded:', project);
+                window.currentProject = project;
+                updateSubtitlePreview();
+            })
+            .catch(err => {
+                console.error('프로젝트 로드 실패:', err);
+                const subtitlePreview = document.getElementById('subtitle-preview');
+                subtitlePreview.textContent = '자막을 불러오는 중 오류가 발생했습니다.';
+            });
+    }
+
+    function updateSubtitlePreview() {
+        const selectedSubtitleType = document.querySelector('input[name="subtitle-type"]:checked').value;
+        const subtitlePreview = document.getElementById('subtitle-preview');
+
+        if (selectedSubtitleType === 'external') {
+            // 외부 자막 파일 미리보기
+            const subtitleSelect = document.getElementById('subtitle-file-select');
+            const selectedFile = subtitleSelect.value;
+
+            if (!selectedFile) {
+                subtitlePreview.textContent = '자막 파일을 선택하세요.';
+                return;
+            }
+
+            subtitlePreview.textContent = '외부 자막 파일 미리보기 로딩 중...';
+
+            // 외부 자막 파일 내용 미리보기
+            loadExternalSubtitlePreview(selectedFile);
+        } else {
+            // 프로젝트 자막 미리보기
+            const project = window.currentProject;
+            if (!project || !project.segments) {
+                subtitlePreview.textContent = '프로젝트를 불러오는 중...';
+                return;
+            }
+
+            console.log(`Found ${project.segments.length} segments`);
+            console.log('Selected subtitle type:', selectedSubtitleType);
+
+            const previewText = project.segments
+                .slice(0, 5) // 처음 5개 세그먼트 보기
+                .map(seg => {
+                    const time = `[${formatTime(seg.start)} --> ${formatTime(seg.end)}]`;
+                    let text = '';
+
+                    switch (selectedSubtitleType) {
+                        case 'translated':
+                            text = seg.translated_text || '번역 없음';
+                            break;
+                        case 'original':
+                            text = seg.source_text || '원본 없음';
+                            break;
+                        case 'reverse':
+                            text = seg.reverse_translated_text || '역번역 없음';
+                            break;
+                        default:
+                            text = seg.translated_text || seg.source_text || '텍스트 없음';
+                    }
+
+                    return `${time}\n${text}`;
+                })
+                .join('\n\n');
+
+            subtitlePreview.textContent = previewText + (project.segments.length > 5 ? '\n\n... 더 많은 자막이 있습니다' : '');
+        }
+    }
+
+    function loadExternalSubtitlePreview(subtitlePath) {
+        // 외부 자막 파일 미리보기를 위한 API 호출
+        fetch(`/api/video-editor/subtitle-preview?path=${encodeURIComponent(subtitlePath)}`)
+            .then(res => res.json())
+            .then(data => {
+                const subtitlePreview = document.getElementById('subtitle-preview');
+                if (data.success && data.preview) {
+                    subtitlePreview.textContent = data.preview;
+                } else {
+                    subtitlePreview.textContent = '자막 파일을 읽을 수 없습니다.';
+                }
+            })
+            .catch(err => {
+                console.error('자막 파일 미리보기 실패:', err);
+                const subtitlePreview = document.getElementById('subtitle-preview');
+                subtitlePreview.textContent = '자막 파일 미리보기를 불러오는 중 오류가 발생했습니다.';
+            });
+    }
+
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function updateProcessButton() {
+        const videoSelect = document.getElementById('video-file-select');
+        const processBtn = document.getElementById('process-video-btn');
+        processBtn.disabled = !videoSelect.value;
+    }
+
+    function processVideo() {
+        const videoSelect = document.getElementById('video-file-select');
+        const selectedTemplate = document.querySelector('.template-option.selected');
+        const selectedSubtitleType = document.querySelector('input[name="subtitle-type"]:checked');
+
+        if (!videoSelect.value || !selectedTemplate || !window.currentProjectId || !selectedSubtitleType) {
+            alert('모든 필수 항목을 선택해주세요.');
+            return;
+        }
+
+        const processBtn = document.getElementById('process-video-btn');
+        const originalText = processBtn.textContent;
+        processBtn.textContent = '처리 중...';
+        processBtn.disabled = true;
+
+        const payload = {
+            project_id: window.currentProjectId,
+            video_path: videoSelect.value,
+            template: selectedTemplate.dataset.template,
+            subtitle_type: selectedSubtitleType.value
+        };
+
+        // 외부 자막 파일이 선택된 경우 추가
+        if (selectedSubtitleType.value === 'external') {
+            const subtitleSelect = document.getElementById('subtitle-file-select');
+            if (!subtitleSelect.value) {
+                alert('외부 자막 파일을 선택해주세요.');
+                processBtn.textContent = originalText;
+                processBtn.disabled = false;
+                return;
+            }
+            payload.external_subtitle_path = subtitleSelect.value;
+        }
+
+        fetch('/api/video-editor/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                alert('영상 처리가 완료되었습니다!');
+                closeVideoEditor();
+                // 대시보드 새로고침
+                handleSearch();
+            } else {
+                alert('영상 처리 중 오류가 발생했습니다: ' + (result.error || '알 수 없는 오류'));
+            }
+        })
+        .catch(err => {
+            console.error('영상 처리 실패:', err);
+            alert('영상 처리 중 오류가 발생했습니다.');
+        })
+        .finally(() => {
+            processBtn.textContent = originalText;
+            processBtn.disabled = false;
+        });
+    }
+
+    window.closeVideoEditor = function() {
+        const modal = document.getElementById('video-editor-modal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    };
 })();
 </script>
+
+<style>
+.project-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+}
+
+.btn-video-edit {
+    background: #4bd4ff;
+    color: #101820;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-video-edit:hover {
+    background: #7ee0ff;
+    transform: translateY(-1px);
+}
+
+.video-editor-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: #1a2332;
+    border-radius: 12px;
+    width: min(800px, 90vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #2a3441;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #f0f4f8;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #8a9aa9;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #f0f4f8;
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+.modal-body h4 {
+    margin: 0 0 12px;
+    color: #4bd4ff;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.video-selection-section,
+.template-selection-section,
+.subtitle-preview-section {
+    margin-bottom: 24px;
+}
+
+.video-selection-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.video-selection-section .form-control {
+    background: #2a3441;
+    border: 1px solid #3a4651;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #f0f4f8;
+    font-size: 14px;
+}
+
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.template-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    border: 2px solid #3a4651;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.template-option:hover {
+    border-color: #4bd4ff;
+}
+
+.template-option.selected {
+    border-color: #4bd4ff;
+    background: rgba(75, 212, 255, 0.1);
+}
+
+.template-preview {
+    width: 60px;
+    height: 40px;
+    background: #3a4651;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #8a9aa9;
+    margin-bottom: 8px;
+}
+
+.template-preview.banner-preview {
+    background: linear-gradient(135deg, #4bd4ff, #7ee0ff);
+    color: #101820;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.template-option span {
+    font-size: 12px;
+    color: #f0f4f8;
+}
+
+.subtitle-file-selection-section,
+.subtitle-selection-section,
+.template-selection-section,
+.subtitle-preview-section {
+    margin-bottom: 24px;
+}
+
+.subtitle-file-selection-section {
+    display: none; /* 기본적으로 숨김 */
+}
+
+.subtitle-file-selection-section .form-control {
+    background: #2a3441;
+    border: 1px solid #3a4651;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #f0f4f8;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.subtitle-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.subtitle-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid #3a4651;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.subtitle-option:hover {
+    border-color: #4bd4ff;
+    background: rgba(75, 212, 255, 0.05);
+}
+
+.subtitle-option input[type="radio"] {
+    margin: 0;
+    accent-color: #4bd4ff;
+}
+
+.subtitle-option label {
+    margin: 0;
+    cursor: pointer;
+    font-size: 14px;
+    color: #f0f4f8;
+    flex: 1;
+}
+
+.subtitle-preview {
+    background: #2a3441;
+    border: 1px solid #3a4651;
+    border-radius: 6px;
+    padding: 12px;
+    min-height: 80px;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #d1dce5;
+    white-space: pre-line;
+}
+
+.modal-footer {
+    padding: 20px 24px;
+    border-top: 1px solid #2a3441;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.btn-primary {
+    background: #4bd4ff;
+    color: #101820;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #7ee0ff;
+    transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+    background: #3a4651;
+    color: #8a9aa9;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-outline {
+    background: transparent;
+    color: #4bd4ff;
+    border: 1px solid #4bd4ff;
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-outline:hover {
+    background: #4bd4ff;
+    color: #101820;
+    transform: translateY(-1px);
+}
+</style>
+
 </body>
 </html>

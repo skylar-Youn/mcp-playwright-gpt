@@ -478,7 +478,238 @@ async def api_update_segment_text(project_id: str, payload: Dict[str, Any] = Bod
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.patch("/projects/{project_id}/segments/time")
+async def api_update_segment_time(project_id: str, payload: Dict[str, Any] = Body(...)):
+    try:
+        segment_id = payload.get("segment_id")
+        start_time = payload.get("start_time")
+        end_time = payload.get("end_time")
+
+        if not segment_id or start_time is None or end_time is None:
+            raise HTTPException(status_code=400, detail="segment_id, start_time, and end_time are required")
+
+        if start_time >= end_time:
+            raise HTTPException(status_code=400, detail="start_time must be less than end_time")
+
+        if start_time < 0 or end_time < 0:
+            raise HTTPException(status_code=400, detail="times must be non-negative")
+
+        from ai_shorts_maker.translator import update_segment_time
+
+        await run_in_threadpool(update_segment_time, project_id, segment_id, float(start_time), float(end_time))
+
+        return {"success": True}
+
+    except Exception as exc:
+        logger.exception("Failed to update segment time for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 app.include_router(translator_router)
+
+
+# Video Editor Router
+video_editor_router = APIRouter(prefix="/api/video-editor", tags=["video-editor"])
+
+
+class VideoProcessRequest(BaseModel):
+    project_id: str
+    video_path: str
+    template: str
+    subtitle_type: str = "translated"  # translated, original, reverse, external
+    external_subtitle_path: Optional[str] = None  # 외부 자막 파일 경로
+
+
+@video_editor_router.post("/process")
+async def api_process_video(payload: VideoProcessRequest) -> Dict[str, Any]:
+    try:
+        # 프로젝트 로드
+        project = await run_in_threadpool(translator_load_project, payload.project_id)
+
+        # 영상 처리 실행
+        result = await run_in_threadpool(
+            process_video_with_subtitles,
+            payload.project_id,
+            payload.video_path,
+            payload.template,
+            payload.subtitle_type,
+            project,
+            payload.external_subtitle_path
+        )
+
+        return {"success": True, "result": result}
+    except Exception as exc:
+        logger.exception("Failed to process video for project %s", payload.project_id)
+        return {"success": False, "error": str(exc)}
+
+
+@video_editor_router.get("/subtitle-preview")
+async def api_subtitle_preview(path: str) -> Dict[str, Any]:
+    """외부 자막 파일의 미리보기를 제공"""
+    try:
+        subtitle_path = Path(path)
+
+        if not subtitle_path.exists():
+            return {"success": False, "error": "파일을 찾을 수 없습니다"}
+
+        if not subtitle_path.suffix.lower() in ['.srt', '.vtt', '.ass']:
+            return {"success": False, "error": "지원하지 않는 자막 파일 형식입니다"}
+
+        # 파일 크기 체크 (10MB 제한)
+        if subtitle_path.stat().st_size > 10 * 1024 * 1024:
+            return {"success": False, "error": "파일이 너무 큽니다"}
+
+        # 파일 내용 읽기 (처음 1000자만)
+        with open(subtitle_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read(1000)
+
+        # 줄 단위로 나누어 처음 10줄만 보여주기
+        lines = content.split('\n')[:10]
+        preview = '\n'.join(lines)
+
+        if len(content) >= 1000:
+            preview += "\n\n... (더 많은 내용이 있습니다)"
+
+        return {"success": True, "preview": preview}
+
+    except Exception as exc:
+        logger.exception("Failed to load subtitle preview")
+        return {"success": False, "error": str(exc)}
+
+
+app.include_router(video_editor_router)
+
+
+def process_video_with_subtitles(project_id: str, video_path: str, template: str, subtitle_type: str, project: Any, external_subtitle_path: Optional[str] = None) -> Dict[str, Any]:
+    """영상에 번역된 자막을 합성하는 함수"""
+    import subprocess
+    from pathlib import Path
+    import tempfile
+    import os
+
+    try:
+        # 출력 디렉토리 설정
+        output_dir = PACKAGE_DIR / "outputs" / "video_editor"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # SRT 파일 생성 (선택된 자막 타입 사용)
+        if subtitle_type == "external" and external_subtitle_path:
+            # 외부 자막 파일 사용
+            srt_file_path = external_subtitle_path
+        else:
+            # 프로젝트 자막 사용
+            srt_content = generate_srt_from_project(project, subtitle_type)
+
+            # 임시 SRT 파일 생성
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.srt', delete=False, encoding='utf-8') as srt_file:
+                srt_file.write(srt_content)
+                srt_file_path = srt_file.name
+
+        # 출력 파일명 생성
+        video_name = Path(video_path).stem
+        output_filename = f"{project_id}_{video_name}_{template}.mp4"
+        output_path = output_dir / output_filename
+
+        # FFmpeg 명령어 구성 (템플릿에 따른 자막 스타일)
+        subtitle_style = get_subtitle_style_for_template(template)
+
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',  # -y: 출력 파일 덮어쓰기
+            '-i', video_path,  # 입력 영상
+            '-vf', f"subtitles={srt_file_path}:force_style='{subtitle_style}'",  # 자막 필터
+            '-c:a', 'copy',  # 오디오 복사
+            str(output_path)  # 출력 경로
+        ]
+
+        # FFmpeg 실행
+        logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True)
+
+        # 임시 파일 정리 (외부 파일이 아닌 경우만)
+        if subtitle_type != "external":
+            os.unlink(srt_file_path)
+
+        return {
+            "output_path": str(output_path),
+            "output_filename": output_filename,
+            "template_used": template,
+            "video_duration": get_video_duration(video_path)
+        }
+
+    except subprocess.CalledProcessError as exc:
+        logger.error(f"FFmpeg error: {exc.stderr}")
+        raise RuntimeError(f"영상 처리 중 오류 발생: {exc.stderr}")
+    except Exception as exc:
+        logger.exception("Video processing failed")
+        raise RuntimeError(f"영상 처리 실패: {str(exc)}")
+
+
+def generate_srt_from_project(project: Any, subtitle_type: str = "translated") -> str:
+    """프로젝트의 세그먼트에서 SRT 형식의 자막 생성"""
+    srt_lines = []
+
+    for i, segment in enumerate(project.segments, 1):
+        # 세그먼트 속성 이름 확인 (start/end vs start_time/end_time)
+        start_time = getattr(segment, 'start', getattr(segment, 'start_time', 0))
+        end_time = getattr(segment, 'end', getattr(segment, 'end_time', 1))
+
+        # 선택된 자막 타입에 따라 텍스트 선택
+        if subtitle_type == "original":
+            text = getattr(segment, 'source_text', None)
+        elif subtitle_type == "reverse":
+            text = getattr(segment, 'reverse_translated_text', None)
+        else:  # translated (기본값)
+            text = getattr(segment, 'translated_text', None)
+
+        # 텍스트가 없으면 다른 텍스트로 대체
+        if not text:
+            text = getattr(segment, 'translated_text', None) or \
+                   getattr(segment, 'source_text', None) or \
+                   getattr(segment, 'original_text', '(자막 없음)')
+
+        # 시간을 SRT 형식으로 변환 (HH:MM:SS,mmm)
+        start_srt = format_time_for_srt(start_time)
+        end_srt = format_time_for_srt(end_time)
+
+        srt_lines.append(str(i))
+        srt_lines.append(f"{start_srt} --> {end_srt}")
+        srt_lines.append(text)
+        srt_lines.append("")  # 빈 줄
+
+    return "\n".join(srt_lines)
+
+
+def format_time_for_srt(seconds: float) -> str:
+    """초를 SRT 형식의 타임코드로 변환"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millisecs = int((seconds - int(seconds)) * 1000)
+
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millisecs:03d}"
+
+
+def get_subtitle_style_for_template(template: str) -> str:
+    """템플릿에 따른 자막 스타일 반환"""
+    styles = {
+        "classic": "FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80000000,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=20",
+        "banner": "FontSize=26,PrimaryColour=&Hffffff,OutlineColour=&H000000,BackColour=&H80ff0000,Bold=1,Outline=2,Shadow=1,Alignment=2,MarginV=300"
+    }
+    return styles.get(template, styles["classic"])
+
+
+def get_video_duration(video_path: str) -> Optional[float]:
+    """영상의 지속시간을 초 단위로 반환"""
+    try:
+        import subprocess
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        import json
+        data = json.loads(result.stdout)
+        return float(data['format']['duration'])
+    except Exception as exc:
+        logger.warning(f"Failed to get video duration: {exc}")
+        return None
 
 
 def default_ytdl_form() -> Dict[str, Any]:

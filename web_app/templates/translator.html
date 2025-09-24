@@ -303,7 +303,18 @@
             const segmentsHtml = project.segments.map((seg, index) => `
                 <div class="segment-item" data-segment-id="${seg.id}">
                     <div class="segment-header">
-                        <div class="segment-time">${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}</div>
+                        <div class="segment-time" data-segment-id="${seg.id}">
+                            <span class="time-display" style="cursor: pointer; color: #007bff; text-decoration: underline;" title="클릭하여 시간 수정">
+                                ${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}
+                            </span>
+                            <div class="time-edit" style="display: none;">
+                                <input type="number" class="start-input" step="0.01" value="${seg.start.toFixed(2)}" min="0" style="width: 60px;">
+                                <span> - </span>
+                                <input type="number" class="end-input" step="0.01" value="${seg.end.toFixed(2)}" min="0" style="width: 60px;">
+                                <button class="btn-save-time" style="margin-left: 5px; font-size: 12px; padding: 2px 6px; background: #28a745; color: white; border: none; border-radius: 3px;">저장</button>
+                                <button class="btn-cancel-time" style="margin-left: 2px; font-size: 12px; padding: 2px 6px; background: #6c757d; color: white; border: none; border-radius: 3px;">취소</button>
+                            </div>
+                        </div>
                         <div class="segment-actions">
                             <button class="btn-edit-segment" data-segment-id="${seg.id}" title="세그먼트 수정">✏️</button>
                             <button class="btn-delete-segment" data-segment-id="${seg.id}" title="세그먼트 삭제">🗑️</button>
@@ -321,6 +332,7 @@
                                         <button class="btn-copy-text" data-type="source" data-segment-id="${seg.id}" title="한국어 복사">복사</button>
                                         <button class="btn-delete-text" data-type="source" data-segment-id="${seg.id}" title="한국어 삭제">삭제</button>
                                     </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
                             </div>
                             <div class="text-row japanese">
@@ -334,6 +346,7 @@
                                         <button class="btn-translate-reverse" data-segment-id="${seg.id}" title="일본어→한국어 번역">역번역</button>
                                         <button class="btn-delete-text" data-type="translated" data-segment-id="${seg.id}" title="일본어 삭제">삭제</button>
                                     </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
                             </div>
                             <div class="text-row korean reverse">
@@ -346,6 +359,7 @@
                                         <button class="btn-copy-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 복사">복사</button>
                                         <button class="btn-delete-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 삭제">삭제</button>
                                     </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
                             </div>
                         </div>
@@ -356,6 +370,7 @@
 
             // Add event listeners for edit/delete buttons
             attachSegmentEventListeners();
+            attachTimeEditListeners();
         }
 
         function runTranslation() {
@@ -428,6 +443,33 @@
                 });
         }
 
+        async function saveSegmentText(segmentId, textType, textValue) {
+            try {
+                const response = await fetch(`/api/translator/projects/${currentProject.id}/segments`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        segment_id: segmentId,
+                        text_type: textType,
+                        text_value: textValue
+                    })
+                });
+
+                if (response.ok) {
+                    console.log(`Successfully saved ${textType} text for segment ${segmentId}`);
+                    return true;
+                } else {
+                    console.error('Failed to save segment text:', response.status, response.statusText);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Error saving segment text:', error);
+                return false;
+            }
+        }
+
         function loadProject(id) {
             fetch(`/api/translator/projects/${id}`)
                 .then(res => res.ok ? res.json() : Promise.reject(res))
@@ -469,20 +511,61 @@
                     const textDisplay = textContent.querySelector('.text-display');
                     const textEdit = textContent.querySelector('.text-edit');
 
-                    if (textDisplay.style.display === 'none') {
-                        // Save changes
-                        const newText = textEdit.value;
-                        updateSegmentText(segmentId, textType, newText);
-                        textDisplay.textContent = newText;
-                        textDisplay.style.display = '';
-                        textEdit.style.display = 'none';
-                        e.target.textContent = '수정';
-                    } else {
+                    if (e.target.textContent === '수정') {
                         // Enter edit mode
+                        textEdit.value = textDisplay.textContent;
                         textDisplay.style.display = 'none';
                         textEdit.style.display = '';
                         textEdit.focus();
                         e.target.textContent = '저장';
+                    } else if (e.target.textContent === '저장') {
+                        // Save changes
+                        const newText = textEdit.value.trim();
+
+                        // 저장 중 표시
+                        const originalText = e.target.textContent;
+                        e.target.textContent = '저장 중...';
+                        e.target.disabled = true;
+
+                        // 서버에 저장
+                        saveSegmentText(segmentId, textType, newText).then(success => {
+                            if (success) {
+                                textDisplay.textContent = newText;
+                                textDisplay.style.display = '';
+                                textEdit.style.display = 'none';
+                                e.target.textContent = '수정';
+
+                                // 저장 시간 표시
+                                const now = new Date();
+                                const timeString = now.toLocaleString('ko-KR', {
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                                const lastModifiedDiv = textContent.querySelector('.last-modified');
+                                lastModifiedDiv.textContent = `마지막 저장: ${timeString}`;
+                                lastModifiedDiv.style.color = '#28a745';
+
+                                // 성공 표시
+                                const originalColor = e.target.style.backgroundColor;
+                                e.target.textContent = '✓ 저장완료';
+                                e.target.style.backgroundColor = '#28a745';
+                                e.target.style.color = 'white';
+                                setTimeout(() => {
+                                    e.target.textContent = '수정';
+                                    e.target.style.backgroundColor = originalColor;
+                                    e.target.style.color = '';
+                                    // 저장 시간 색상을 원래대로
+                                    lastModifiedDiv.style.color = '#888';
+                                }, 3000);
+                            } else {
+                                alert('저장에 실패했습니다. 다시 시도해주세요.');
+                                e.target.textContent = '저장';
+                            }
+                            e.target.disabled = false;
+                        });
                     }
                 });
             });
@@ -676,6 +759,107 @@
             });
         }
 
+        function attachTimeEditListeners() {
+            // Time display click to edit
+            document.querySelectorAll('.time-display').forEach(timeDisplay => {
+                timeDisplay.addEventListener('click', (e) => {
+                    const segmentId = e.currentTarget.dataset.segmentId;
+                    const timeEdit = document.querySelector(`.time-edit[data-segment-id="${segmentId}"]`);
+
+                    // Hide display, show edit
+                    e.currentTarget.style.display = 'none';
+                    timeEdit.style.display = 'block';
+
+                    // Focus on start input
+                    timeEdit.querySelector('.start-input').focus();
+                });
+            });
+
+            // Save time changes
+            document.querySelectorAll('.btn-save-time').forEach(saveBtn => {
+                saveBtn.addEventListener('click', async (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const timeEdit = e.target.closest('.time-edit');
+                    const startInput = timeEdit.querySelector('.start-input');
+                    const endInput = timeEdit.querySelector('.end-input');
+
+                    const newStart = parseFloat(startInput.value);
+                    const newEnd = parseFloat(endInput.value);
+
+                    // Validation
+                    if (newStart >= newEnd) {
+                        alert('시작 시간은 종료 시간보다 작아야 합니다.');
+                        return;
+                    }
+
+                    if (newStart < 0 || newEnd < 0) {
+                        alert('시간은 0보다 크거나 같아야 합니다.');
+                        return;
+                    }
+
+                    // Save to server
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/timing`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                start_time: newStart,
+                                end_time: newEnd
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Update display
+                            const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
+                            const startTime = timeDisplay.querySelector('.start-time');
+                            const endTime = timeDisplay.querySelector('.end-time');
+                            const duration = timeDisplay.querySelector('.time-duration');
+
+                            startTime.textContent = `${Math.floor(newStart / 60)}:${(newStart % 60).toFixed(2).padStart(5, '0')}`;
+                            endTime.textContent = `${Math.floor(newEnd / 60)}:${(newEnd % 60).toFixed(2).padStart(5, '0')}`;
+                            duration.textContent = ` (${(newEnd - newStart).toFixed(1)}초)`;
+
+                            // Hide edit, show display
+                            timeEdit.style.display = 'none';
+                            timeDisplay.style.display = 'block';
+
+                            // Success feedback
+                            saveBtn.textContent = '✓';
+                            setTimeout(() => {
+                                saveBtn.textContent = '저장';
+                            }, 1000);
+                        } else {
+                            alert('시간 저장에 실패했습니다.');
+                        }
+                    } catch (error) {
+                        console.error('Time save error:', error);
+                        alert('시간 저장 중 오류가 발생했습니다.');
+                    }
+                });
+            });
+
+            // Cancel time edit
+            document.querySelectorAll('.btn-cancel-time').forEach(cancelBtn => {
+                cancelBtn.addEventListener('click', (e) => {
+                    const segmentId = e.target.dataset.segmentId;
+                    const timeEdit = e.target.closest('.time-edit');
+                    const timeDisplay = document.querySelector(`.time-display[data-segment-id="${segmentId}"]`);
+
+                    // Reset inputs to original values
+                    const segment = currentProject.segments.find(s => s.id === segmentId);
+                    if (segment) {
+                        timeEdit.querySelector('.start-input').value = segment.start.toFixed(1);
+                        timeEdit.querySelector('.end-input').value = segment.end.toFixed(1);
+                    }
+
+                    // Hide edit, show display
+                    timeEdit.style.display = 'none';
+                    timeDisplay.style.display = 'block';
+                });
+            });
+        }
+
         function deleteProject() {
             if (!confirm('정말로 이 프로젝트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
                 return;
@@ -707,6 +891,110 @@
                     deleteBtn.disabled = false;
                     deleteBtn.textContent = '프로젝트 삭제';
                 }
+            });
+        }
+
+        function attachTimeEditListeners() {
+            // Time display click to edit
+            document.querySelectorAll('.time-display').forEach(timeDisplay => {
+                timeDisplay.addEventListener('click', (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+
+                    // Hide display, show edit
+                    e.target.style.display = 'none';
+                    timeEdit.style.display = 'inline-block';
+
+                    // Focus on first input
+                    timeEdit.querySelector('.start-input').focus();
+                    timeEdit.querySelector('.start-input').select();
+                });
+            });
+
+            // Save time button
+            document.querySelectorAll('.btn-save-time').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const segmentId = segmentTimeDiv.dataset.segmentId;
+                    const timeDisplay = segmentTimeDiv.querySelector('.time-display');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+                    const startInput = timeEdit.querySelector('.start-input');
+                    const endInput = timeEdit.querySelector('.end-input');
+
+                    const startTime = parseFloat(startInput.value);
+                    const endTime = parseFloat(endInput.value);
+
+                    // Validation
+                    if (startTime >= endTime) {
+                        alert('시작 시간은 종료 시간보다 작아야 합니다.');
+                        return;
+                    }
+
+                    if (startTime < 0 || endTime < 0) {
+                        alert('시간은 0보다 크거나 같아야 합니다.');
+                        return;
+                    }
+
+                    // Save to server
+                    e.target.disabled = true;
+                    e.target.textContent = '저장중...';
+
+                    try {
+                        const response = await fetch(`/api/translator/projects/${currentProject.id}/segments/time`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                segment_id: segmentId,
+                                start_time: startTime,
+                                end_time: endTime
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Update display
+                            timeDisplay.textContent = `${startTime.toFixed(2)} - ${endTime.toFixed(2)}`;
+                            timeEdit.style.display = 'none';
+                            timeDisplay.style.display = 'inline';
+
+                            // Success feedback
+                            e.target.textContent = '✓';
+                            e.target.style.background = '#28a745';
+                            setTimeout(() => {
+                                e.target.textContent = '저장';
+                                e.target.style.background = '';
+                            }, 1500);
+                        } else {
+                            throw new Error('서버 저장 실패');
+                        }
+                    } catch (error) {
+                        console.error('Time save error:', error);
+                        alert('시간 저장에 실패했습니다.');
+                    } finally {
+                        e.target.disabled = false;
+                        e.target.textContent = '저장';
+                    }
+                });
+            });
+
+            // Cancel time edit button
+            document.querySelectorAll('.btn-cancel-time').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const segmentTimeDiv = e.target.closest('.segment-time');
+                    const timeDisplay = segmentTimeDiv.querySelector('.time-display');
+                    const timeEdit = segmentTimeDiv.querySelector('.time-edit');
+
+                    // Reset inputs to original values
+                    const segmentId = segmentTimeDiv.dataset.segmentId;
+                    const segment = currentProject.segments.find(s => s.id === segmentId);
+                    if (segment) {
+                        timeEdit.querySelector('.start-input').value = segment.start.toFixed(2);
+                        timeEdit.querySelector('.end-input').value = segment.end.toFixed(2);
+                    }
+
+                    // Hide edit, show display
+                    timeEdit.style.display = 'none';
+                    timeDisplay.style.display = 'inline';
+                });
             });
         }
 

@@ -802,6 +802,31 @@ def update_segment_text(project_id: str, segment_id: str, text_type: str, text_v
     save_project(project)
     logger.info(f"Updated {text_type} text for segment {segment_id} in project {project_id}")
 
+
+def update_segment_time(project_id: str, segment_id: str, start_time: float, end_time: float) -> None:
+    """Update the timing of a segment."""
+    project = load_project(project_id)
+    if not project:
+        raise FileNotFoundError(f"Project {project_id} not found")
+
+    # Find the segment by ID
+    segment = None
+    for seg in project.segments:
+        if seg.id == segment_id:
+            segment = seg
+            break
+
+    if not segment:
+        raise ValueError(f"Segment {segment_id} not found in project {project_id}")
+
+    # Update the timing
+    segment.start = start_time
+    segment.end = end_time
+
+    # Save the updated project
+    save_project(project)
+    logger.info(f"Updated timing for segment {segment_id} in project {project_id}: {start_time:.2f} - {end_time:.2f}")
+
     # If this is a reverse translation update, re-save the translation texts
     if text_type == "reverse_translated":
         _save_translation_texts(project)

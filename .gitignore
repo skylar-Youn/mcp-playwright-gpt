@@ -9,3 +9,4 @@ ai_shorts_maker/assets
 youtube/__pycache__/*
 youtube/download/*
 youtube/old
+*.png
