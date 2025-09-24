@@ -44,9 +44,34 @@
                 </div>
             </section>
 
-            <section class="panel">
+            <section class="panel" id="ai-commentary-section">
                 <div class="panel-header">
-                    <h2>2. 번역 설정</h2>
+                    <h2>2. AI 해설 생성</h2>
+                    <p class="panel-subtitle">선택된 영상의 자막을 분석하여 AI가 자동으로 해설을 생성합니다.</p>
+                </div>
+                <div id="selected-source-info" class="source-info">
+                    <div class="source-details">
+                        <h4 id="selected-source-title">선택된 소스</h4>
+                        <p><strong>영상:</strong> <span id="selected-video-name"></span></p>
+                        <p><strong>자막:</strong> <span id="selected-subtitle-name"></span></p>
+                    </div>
+                </div>
+                <div class="ai-commentary-controls">
+                    <button type="button" id="generate-commentary-btn" class="btn-primary">
+                        AI 해설 생성하기
+                    </button>
+                    <button type="button" id="skip-commentary-btn" class="btn-secondary">
+                        건너뛰기
+                    </button>
+                </div>
+                <div id="commentary-generation-status" class="status-message" style="display: none;">
+                    <p>AI가 해설을 생성하고 있습니다...</p>
+                </div>
+            </section>
+
+            <section class="panel" id="translation-settings-section">
+                <div class="panel-header">
+                    <h2>3. 번역 설정</h2>
                     <div>
                         <button type="button" id="load-settings-btn" class="btn-secondary btn-sm">지난 설정 불러오기</button>
                         <button type="button" id="save-settings-btn" class="btn-secondary btn-sm">설정 저장</button>
@@ -127,6 +152,7 @@
                 radio.addEventListener('change', (event) => {
                     const selectedIndex = parseInt(event.target.value, 10);
                     selectedSource = items[selectedIndex];
+                    showAICommentarySection();
                 });
             });
         }
@@ -265,6 +291,30 @@
                 translateBtn.addEventListener('click', runTranslation);
                 projectActions.appendChild(translateBtn);
             } else if (project.status === 'voice_ready') {
+                // Voice synthesis mode selector
+                const voiceModeDiv = document.createElement('div');
+                voiceModeDiv.style.display = 'flex';
+                voiceModeDiv.style.alignItems = 'center';
+                voiceModeDiv.style.gap = '10px';
+                voiceModeDiv.style.marginBottom = '10px';
+
+                const voiceModeLabel = document.createElement('label');
+                voiceModeLabel.textContent = '음성 합성 대상:';
+                voiceModeLabel.style.fontWeight = 'bold';
+
+                const voiceModeSelect = document.createElement('select');
+                voiceModeSelect.id = 'voice-synthesis-mode';
+                voiceModeSelect.innerHTML = `
+                    <option value="subtitle" ${project.voice_synthesis_mode === 'subtitle' ? 'selected' : ''}>자막만</option>
+                    <option value="commentary" ${project.voice_synthesis_mode === 'commentary' ? 'selected' : ''}>해설만</option>
+                    <option value="both" ${project.voice_synthesis_mode === 'both' ? 'selected' : ''}>자막+해설</option>
+                `;
+                voiceModeSelect.addEventListener('change', updateVoiceSynthesisMode);
+
+                voiceModeDiv.appendChild(voiceModeLabel);
+                voiceModeDiv.appendChild(voiceModeSelect);
+                projectActions.appendChild(voiceModeDiv);
+
                 const voiceBtn = document.createElement('button');
                 voiceBtn.id = 'voice-btn';
                 voiceBtn.className = 'btn-primary';
@@ -358,6 +408,19 @@
                                         <button class="btn-edit-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 수정">수정</button>
                                         <button class="btn-copy-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 복사">복사</button>
                                         <button class="btn-delete-text" data-type="reverse_translated" data-segment-id="${seg.id}" title="역번역 한국어 삭제">삭제</button>
+                                    </div>
+                                    <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
+                                </div>
+                            </div>
+                            <div class="text-row commentary">
+                                <label>해설/코멘터리:</label>
+                                <div class="text-content" data-type="commentary" data-segment-id="${seg.id}">
+                                    <span class="text-display">${seg.commentary || ''}</span>
+                                    <textarea class="text-edit" style="display: none; min-height: 60px; resize: vertical;">${(seg.commentary || '').replace(/"/g, '&quot;')}</textarea>
+                                    <div class="text-buttons">
+                                        <button class="btn-edit-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 수정">수정</button>
+                                        <button class="btn-copy-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 복사">복사</button>
+                                        <button class="btn-delete-text" data-type="commentary" data-segment-id="${seg.id}" title="해설 삭제">삭제</button>
                                     </div>
                                     <div class="last-modified" style="font-size: 0.8em; color: #888; margin-top: 4px;"></div>
                                 </div>
@@ -702,6 +765,33 @@
             });
         }
 
+        function updateVoiceSynthesisMode() {
+            const select = document.getElementById('voice-synthesis-mode');
+            const mode = select.value;
+
+            fetch(`/api/translator/projects/${currentProject.id}/voice-synthesis-mode`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ voice_synthesis_mode: mode })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+                return res.json();
+            })
+            .then(() => {
+                console.log(`Voice synthesis mode updated to: ${mode}`);
+                currentProject.voice_synthesis_mode = mode;
+            })
+            .catch(err => {
+                console.error('Failed to update voice synthesis mode:', err);
+                alert('음성 합성 모드 업데이트에 실패했습니다.');
+                // Revert select to previous value
+                select.value = currentProject.voice_synthesis_mode;
+            });
+        }
+
         function runReverseTranslateAll() {
             const btn = document.getElementById('reverse-translate-all-btn');
             btn.disabled = true;
@@ -860,6 +950,108 @@
             });
         }
 
+        function showAICommentarySection() {
+            if (!selectedSource) return;
+
+            const aiCommentarySection = document.getElementById('ai-commentary-section');
+            const translationSettingsSection = document.getElementById('translation-settings-section');
+
+            // Show AI commentary section
+            aiCommentarySection.style.display = 'block';
+
+            // Ensure translation settings section stays hidden until needed
+            translationSettingsSection.style.display = 'none';
+
+            // Update selected source info
+            document.getElementById('selected-video-name').textContent = selectedSource.base_name;
+            document.getElementById('selected-subtitle-name').textContent =
+                selectedSource.subtitle_path ? selectedSource.subtitle_path.split('/').pop() : '자막 없음';
+
+            // Scroll to AI commentary section with a slight delay for better UX
+            setTimeout(() => {
+                aiCommentarySection.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }, 100);
+        }
+
+        function showTranslationSettings() {
+            const translationSettingsSection = document.getElementById('translation-settings-section');
+            translationSettingsSection.style.display = 'block';
+
+            // Scroll to translation settings
+            translationSettingsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function generateAICommentary() {
+            if (!selectedSource) {
+                alert('소스가 선택되지 않았습니다.');
+                return;
+            }
+
+            const generateBtn = document.getElementById('generate-commentary-btn');
+            const skipBtn = document.getElementById('skip-commentary-btn');
+            const statusDiv = document.getElementById('commentary-generation-status');
+
+            // Disable buttons and show status
+            generateBtn.disabled = true;
+            skipBtn.disabled = true;
+            generateBtn.textContent = 'AI 해설 생성 중...';
+            statusDiv.style.display = 'block';
+
+            try {
+                // First create the project
+                const projectData = {
+                    source_video: selectedSource.video_path,
+                    source_subtitle: selectedSource.subtitle_path || null,
+                    target_lang: 'ja',
+                    translation_mode: 'literal',
+                    tone_hint: '간결하게'
+                };
+
+                const createResponse = await fetch('/api/translator/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(projectData)
+                });
+
+                if (!createResponse.ok) {
+                    throw new Error(`프로젝트 생성 실패: ${createResponse.status}`);
+                }
+
+                const project = await createResponse.json();
+
+                // Then generate AI commentary
+                const commentaryResponse = await fetch(`/api/translator/projects/${project.id}/generate-commentary`, {
+                    method: 'POST'
+                });
+
+                if (!commentaryResponse.ok) {
+                    throw new Error(`AI 해설 생성 실패: ${commentaryResponse.status}`);
+                }
+
+                const updatedProject = await commentaryResponse.json();
+
+                // Load the project in the UI
+                renderProject(updatedProject);
+
+            } catch (error) {
+                console.error('AI 해설 생성 오류:', error);
+                alert(`AI 해설 생성 중 오류가 발생했습니다: ${error.message}`);
+
+                // Re-enable buttons
+                generateBtn.disabled = false;
+                skipBtn.disabled = false;
+                generateBtn.textContent = 'AI 해설 생성하기';
+                statusDiv.style.display = 'none';
+            }
+        }
+
+        function skipAICommentary() {
+            showTranslationSettings();
+        }
+
         function deleteProject() {
             if (!confirm('정말로 이 프로젝트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
                 return;
@@ -998,6 +1190,10 @@
             });
         }
 
+        // Add event listeners for AI commentary buttons
+        document.getElementById('generate-commentary-btn').addEventListener('click', generateAICommentary);
+        document.getElementById('skip-commentary-btn').addEventListener('click', skipAICommentary);
+
         if (projectId) {
             loadProject(projectId);
         } else {
@@ -1008,5 +1204,111 @@
         }
     })();
     </script>
+
+    <style>
+        .text-row.commentary {
+            background: #f8f9ff;
+            border-left: 3px solid #6c5ce7;
+            padding-left: 10px;
+            margin: 8px 0;
+        }
+
+        .text-row.commentary label {
+            color: #6c5ce7;
+            font-weight: bold;
+        }
+
+        .text-row.commentary .text-edit {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+
+        .text-row.commentary .text-display {
+            font-style: italic;
+            color: #555;
+            min-height: 20px;
+        }
+
+        .text-row.commentary .text-display:empty::before {
+            content: '해설을 입력하세요...';
+            color: #999;
+            font-style: italic;
+        }
+
+        #voice-synthesis-mode {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            color: #333;
+        }
+
+        #ai-commentary-section {
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            background: #f8fbff;
+            box-shadow: 0 2px 10px rgba(0, 123, 255, 0.1);
+        }
+
+        #ai-commentary-section .panel-header h2 {
+            color: #007bff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #ai-commentary-section .panel-header h2::before {
+            content: '🤖';
+            font-size: 1.2em;
+        }
+
+        .source-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .source-details h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .source-details p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+
+        .ai-commentary-controls {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+
+        .ai-commentary-controls button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+
+        .status-message {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+            color: #1565c0;
+            font-weight: bold;
+        }
+
+        .status-message p {
+            margin: 0;
+        }
+    </style>
 </body>
 </html>

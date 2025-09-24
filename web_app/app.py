@@ -114,6 +114,7 @@ OUTPUT_DIR = PACKAGE_DIR / "outputs"
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 YTDL_SETTINGS_PATH = BASE_DIR / "ytdl_settings.json"
+YTDL_HISTORY_PATH = BASE_DIR / "ytdl_history.json"
 DEFAULT_YTDL_OUTPUT_DIR = (BASE_DIR.parent / "youtube" / "download").resolve()
 DEFAULT_YTDL_SETTINGS: Dict[str, Any] = {
     "output_dir": str(DEFAULT_YTDL_OUTPUT_DIR),
@@ -380,6 +381,16 @@ async def api_delete_translator_project(project_id: str) -> None:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@translator_router.post("/projects/{project_id}/generate-commentary", response_model=TranslatorProject)
+async def api_generate_ai_commentary(project_id: str) -> TranslatorProject:
+    try:
+        from ai_shorts_maker.translator import generate_ai_commentary_for_project
+        return await run_in_threadpool(generate_ai_commentary_for_project, project_id)
+    except Exception as exc:
+        logger.exception("Failed to generate AI commentary for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @translator_router.post("/projects/{project_id}/translate", response_model=TranslatorProject)
 async def api_translate_project(project_id: str) -> TranslatorProject:
     try:
@@ -502,6 +513,30 @@ async def api_update_segment_time(project_id: str, payload: Dict[str, Any] = Bod
 
     except Exception as exc:
         logger.exception("Failed to update segment time for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.patch("/projects/{project_id}/voice-synthesis-mode")
+async def api_update_voice_synthesis_mode(project_id: str, payload: Dict[str, Any] = Body(...)):
+    try:
+        voice_synthesis_mode = payload.get("voice_synthesis_mode")
+
+        if not voice_synthesis_mode:
+            raise HTTPException(status_code=400, detail="voice_synthesis_mode is required")
+
+        if voice_synthesis_mode not in ["subtitle", "commentary", "both"]:
+            raise HTTPException(status_code=400, detail="voice_synthesis_mode must be one of: subtitle, commentary, both")
+
+        from ai_shorts_maker.translator import load_project, save_project
+
+        project = await run_in_threadpool(load_project, project_id)
+        project.voice_synthesis_mode = voice_synthesis_mode
+        await run_in_threadpool(save_project, project)
+
+        return {"success": True, "voice_synthesis_mode": voice_synthesis_mode}
+
+    except Exception as exc:
+        logger.exception("Failed to update voice synthesis mode for project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -757,6 +792,79 @@ def save_ytdl_settings(values: Dict[str, Any]) -> None:
         logger.warning("Failed to save YTDL settings: %s", exc)
 
 
+def load_download_history() -> List[Dict[str, Any]]:
+    """Load download history from JSON file."""
+    if not YTDL_HISTORY_PATH.exists():
+        return []
+    try:
+        data = json.loads(YTDL_HISTORY_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load download history: %s", exc)
+        return []
+
+
+def save_download_history(history: List[Dict[str, Any]]) -> None:
+    """Save download history to JSON file."""
+    try:
+        YTDL_HISTORY_PATH.write_text(
+            json.dumps(history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Failed to save download history: %s", exc)
+
+
+def add_to_download_history(urls: List[str], files: List[Path], settings: Dict[str, Any]) -> None:
+    """Add download record to history."""
+    history = load_download_history()
+
+    download_record = {
+        "timestamp": datetime.now().isoformat(),
+        "urls": urls,
+        "files": [str(f) for f in files],
+        "settings": {
+            "output_dir": settings.get("output_dir"),
+            "sub_langs": settings.get("sub_langs"),
+            "download_subs": settings.get("download_subs"),
+            "auto_subs": settings.get("auto_subs"),
+        }
+    }
+
+    history.insert(0, download_record)  # Add to beginning
+    # Keep only last 100 records
+    history = history[:100]
+
+    save_download_history(history)
+
+
+def delete_download_files(file_paths: List[str]) -> Dict[str, Any]:
+    """Delete downloaded files and return result."""
+    deleted = []
+    errors = []
+
+    for file_path in file_paths:
+        try:
+            path = Path(file_path)
+            if path.exists():
+                path.unlink()
+                deleted.append(file_path)
+
+                # Also try to delete related files (subtitles, etc.)
+                base_name = path.stem
+                parent_dir = path.parent
+                for related_file in parent_dir.glob(f"{base_name}.*"):
+                    if related_file != path and related_file.exists():
+                        related_file.unlink()
+                        deleted.append(str(related_file))
+            else:
+                errors.append(f"File not found: {file_path}")
+        except Exception as exc:
+            errors.append(f"Error deleting {file_path}: {str(exc)}")
+
+    return {"deleted": deleted, "errors": errors}
+
+
 TRANSLATOR_SETTINGS_PATH = BASE_DIR / "translator_settings.json"
 DEFAULT_TRANSLATOR_SETTINGS: Dict[str, Any] = {
     "target_lang": "ja",
@@ -803,6 +911,18 @@ async def ytdl_index(request: Request) -> HTMLResponse:
         "settings_saved": False,
     }
     return templates.TemplateResponse("ytdl.html", context)
+
+
+@app.get("/api/ytdl/history")
+async def api_get_download_history() -> List[Dict[str, Any]]:
+    """Get download history."""
+    return load_download_history()
+
+
+@app.delete("/api/ytdl/files")
+async def api_delete_files(file_paths: List[str] = Body(...)) -> Dict[str, Any]:
+    """Delete downloaded files."""
+    return delete_download_files(file_paths)
 
 
 @app.post("/ytdl", response_class=HTMLResponse)
@@ -857,6 +977,11 @@ async def ytdl_download(
                 sub_langs=sub_langs,
                 sub_format=sub_format,
             )
+
+            # Add to download history if not dry run
+            if not dry_run_enabled and files:
+                add_to_download_history(parsed_urls, files, form_values)
+
             result = {
                 "files": [str(path) for path in files],
                 "count": len(files),

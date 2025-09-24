@@ -70,6 +70,13 @@
     </section>
     {% endif %}
 
+    <section class="panel">
+        <h2>다운로드 기록</h2>
+        <div id="download-history">
+            <div class="loading">기록을 불러오는 중...</div>
+        </div>
+    </section>
+
     <section class="panel info">
         <h2>사용 팁</h2>
         <ul>
@@ -79,5 +86,152 @@
         </ul>
     </section>
 </div>
+
+<script>
+// Load and display download history
+async function loadDownloadHistory() {
+    try {
+        const response = await fetch('/api/ytdl/history');
+        const history = await response.json();
+        displayHistory(history);
+    } catch (error) {
+        document.getElementById('download-history').innerHTML =
+            '<div class="alert error">기록을 불러올 수 없습니다: ' + error.message + '</div>';
+    }
+}
+
+function displayHistory(history) {
+    const container = document.getElementById('download-history');
+
+    if (history.length === 0) {
+        container.innerHTML = '<div class="info">아직 다운로드 기록이 없습니다.</div>';
+        return;
+    }
+
+    let html = '';
+    history.forEach((record, index) => {
+        const date = new Date(record.timestamp).toLocaleString('ko-KR');
+        const urls = record.urls.join('<br>');
+
+        html += `
+            <div class="history-item">
+                <div class="history-header">
+                    <span class="timestamp">${date}</span>
+                    <button class="delete-btn" onclick="deleteFiles(${index}, ${JSON.stringify(record.files).replace(/"/g, '&quot;')})">
+                        파일 삭제
+                    </button>
+                </div>
+                <div class="history-urls">
+                    <strong>URL:</strong><br>
+                    <small>${urls}</small>
+                </div>
+                <div class="history-files">
+                    <strong>파일 (${record.files.length}개):</strong>
+                    <ul class="file-list small">
+                        ${record.files.map(file => `<li><code>${file}</code></li>`).join('')}
+                    </ul>
+                </div>
+                <div class="history-settings">
+                    <small>설정: ${record.settings.sub_langs} | ${record.settings.download_subs ? '자막O' : '자막X'}</small>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+async function deleteFiles(recordIndex, filePaths) {
+    if (!confirm('선택한 파일들을 삭제하시겠습니까?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/ytdl/files', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(filePaths)
+        });
+
+        const result = await response.json();
+
+        if (result.errors && result.errors.length > 0) {
+            alert('일부 파일 삭제 중 오류가 발생했습니다:\n' + result.errors.join('\n'));
+        } else {
+            alert(`${result.deleted.length}개 파일이 삭제되었습니다.`);
+        }
+
+        // Reload history to reflect changes
+        loadDownloadHistory();
+    } catch (error) {
+        alert('파일 삭제 중 오류가 발생했습니다: ' + error.message);
+    }
+}
+
+// Load history when page loads
+document.addEventListener('DOMContentLoaded', loadDownloadHistory);
+</script>
+
+<style>
+.history-item {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    padding: 15px;
+    background: #f9f9f9;
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.timestamp {
+    font-weight: bold;
+    color: #666;
+}
+
+.delete-btn {
+    background: #ff4444;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.delete-btn:hover {
+    background: #cc0000;
+}
+
+.history-urls, .history-files, .history-settings {
+    margin-bottom: 8px;
+}
+
+.file-list.small {
+    font-size: 11px;
+    max-height: 100px;
+    overflow-y: auto;
+}
+
+.loading {
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+
+.info {
+    text-align: center;
+    color: #888;
+    font-style: italic;
+    padding: 20px;
+}
+</style>
+
 </body>
 </html>

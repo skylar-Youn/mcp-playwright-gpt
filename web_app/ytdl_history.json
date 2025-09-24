@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2025-09-24T19:58:46.197771",
+    "urls": [
+      "https://www.youtube.com/shorts/vTMssu3XB7g"
+    ],
+    "files": [
+      "/home/sk/ws/mcp-playwright/youtube/download/시어머니 머리꼭대기에 앉은 전지현의 미친 필살기🔥북극성 4,5화 [vTMssu3XB7g].webm",
+      "/home/sk/ws/mcp-playwright/youtube/download/시어머니 머리꼭대기에 앉은 전지현의 미친 필살기🔥북극성 4,5화 [vTMssu3XB7g].ko.srt"
+    ],
+    "settings": {
+      "output_dir": "/home/sk/ws/mcp-playwright/youtube/download",
+      "sub_langs": "ko",
+      "download_subs": true,
+      "auto_subs": true
+    }
+  }
+]

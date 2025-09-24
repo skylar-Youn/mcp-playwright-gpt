@@ -32,6 +32,7 @@ class TranslatorSegment(BaseModel):
     source_text: Optional[str] = None
     translated_text: Optional[str] = None
     reverse_translated_text: Optional[str] = None
+    commentary: Optional[str] = None  # 해설 텍스트
 
 
 class TranslatorProject(BaseModel):
@@ -46,6 +47,7 @@ class TranslatorProject(BaseModel):
     prompt_hint: Optional[str] = None
     fps: Optional[int] = None
     voice: Optional[str] = None
+    voice_synthesis_mode: Literal["subtitle", "commentary", "both"] = "subtitle"  # 음성 합성 대상
     music_track: Optional[str] = None
     duration: Optional[float] = None
     segment_max_duration: float = DEFAULT_SEGMENT_MAX
@@ -696,6 +698,69 @@ def populate_segments_from_subtitles(project: TranslatorProject) -> TranslatorPr
     return project
 
 
+def generate_ai_commentary_for_project(project_id: str) -> TranslatorProject:
+    """Generate AI commentary for all segments in a project based on source text."""
+    project = load_project(project_id)
+
+    if project.status not in ["segmenting", "draft"]:
+        logger.warning("Project %s is not in a state for AI commentary generation (status: %s)", project_id, project.status)
+        return project
+
+    project = populate_segments_from_subtitles(project)
+    if not any(seg.source_text for seg in project.segments):
+        project.status = "failed"
+        project.extra["error"] = "Could not find any source text to generate commentary from."
+        return save_project(project)
+
+    try:
+        from .openai_client import OpenAIShortsClient
+        client = OpenAIShortsClient()
+
+        # Generate commentary for each segment
+        for segment in project.segments:
+            if not segment.source_text:
+                continue
+
+            # Create prompt for commentary generation
+            commentary_prompt = f"""다음은 동영상의 자막 내용입니다. 이 내용에 대해 간단하고 유익한 해설을 한국어로 작성해주세요.
+
+자막 내용: "{segment.source_text}"
+
+해설 요구사항:
+- 1-2문장으로 간결하게
+- 이해를 돕거나 추가 정보를 제공
+- 자연스럽고 친근한 톤
+- 시청자에게 도움이 되는 내용
+
+해설:"""
+
+            try:
+                commentary = client.generate_text(
+                    prompt=commentary_prompt,
+                    model="gpt-4o-mini",
+                    max_tokens=200
+                ).strip()
+
+                segment.commentary = commentary
+                logger.info(f"Generated commentary for segment {segment.id}: {commentary[:50]}...")
+
+            except Exception as exc:
+                logger.warning(f"Failed to generate commentary for segment {segment.id}: {exc}")
+                continue
+
+        project.status = "segmenting"  # Keep in segmenting status
+        project = save_project(project)
+
+        logger.info(f"AI commentary generation completed for project {project_id}")
+        return project
+
+    except Exception as exc:
+        logger.exception("Failed to generate AI commentary for project %s", project_id)
+        project.status = "failed"
+        project.extra["error"] = f"AI 해설 생성 중 오류 발생: {str(exc)}"
+        return save_project(project)
+
+
 def translate_project_segments(project_id: str) -> TranslatorProject:
     """Run translation for all segments in a project."""
     project = load_project(project_id)
@@ -795,6 +860,8 @@ def update_segment_text(project_id: str, segment_id: str, text_type: str, text_v
         segment.translated_text = text_value
     elif text_type == "reverse_translated":
         segment.reverse_translated_text = text_value
+    elif text_type == "commentary":
+        segment.commentary = text_value
     else:
         raise ValueError(f"Invalid text_type: {text_type}")
 
@@ -886,10 +953,24 @@ def synthesize_voice_for_project(project_id: str) -> TranslatorProject:
         logger.warning("Project %s is not ready for voice synthesis (status: %s)", project_id, project.status)
         return project
 
-    full_script = "\n".join([seg.translated_text for seg in project.segments if seg.translated_text])
+    # Build script based on voice synthesis mode
+    script_parts = []
+    for seg in project.segments:
+        if project.voice_synthesis_mode == "subtitle" and seg.translated_text:
+            script_parts.append(seg.translated_text)
+        elif project.voice_synthesis_mode == "commentary" and seg.commentary:
+            script_parts.append(seg.commentary)
+        elif project.voice_synthesis_mode == "both":
+            if seg.translated_text:
+                script_parts.append(seg.translated_text)
+            if seg.commentary:
+                script_parts.append(seg.commentary)
+
+    full_script = "\n".join(script_parts)
     if not full_script:
         project.status = "failed"
-        project.extra["error"] = "No translated text available to synthesize."
+        mode_text = {"subtitle": "자막", "commentary": "해설", "both": "자막+해설"}[project.voice_synthesis_mode]
+        project.extra["error"] = f"음성 변환할 {mode_text} 텍스트가 없습니다."
         return save_project(project)
 
     project.status = "rendering" # Next logical status
@@ -996,6 +1077,7 @@ __all__ = [
     "update_project",
     "downloads_listing",
     "aggregate_dashboard_projects",
+    "generate_ai_commentary_for_project",
     "translate_project_segments",
     "synthesize_voice_for_project",
     "render_translated_project",
