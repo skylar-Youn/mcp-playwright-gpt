@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Body, FastAPI, Form, HTTPException, Request, status
@@ -58,6 +58,20 @@ class SubtitleStyleRequest(BaseModel):
     banner_primary_text: Optional[str] = None
     banner_secondary_text: Optional[str] = None
 
+
+class DashboardProject(BaseModel):
+    id: str
+    title: str
+    project_type: Literal["shorts", "translator"] = "shorts"
+    status: Literal["draft", "translating", "voice_ready", "rendering", "rendered", "failed"] = "draft"
+    completed_steps: int
+    total_steps: int = 4
+    topic: Optional[str] = None
+    language: Optional[str] = None
+    thumbnail: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -90,6 +104,43 @@ def sanitize_lang(value: Optional[str]) -> str:
         return "ko"
     value_lower = value.lower()
     return value_lower if value_lower in LANG_OPTION_SET else "ko"
+
+
+def _path_exists(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    try:
+        return Path(value).exists()
+    except OSError:
+        return False
+
+
+def build_dashboard_project(summary: ProjectSummary) -> DashboardProject:
+    audio_ready = _path_exists(summary.audio_path)
+    video_ready = _path_exists(summary.video_path)
+
+    completed_steps = 1
+    status: Literal["draft", "translating", "voice_ready", "rendering", "rendered", "failed"] = "draft"
+
+    if audio_ready:
+        completed_steps = max(completed_steps, 3)
+        status = "voice_ready"
+    if video_ready:
+        completed_steps = 4
+        status = "rendered"
+
+    updated_at = summary.updated_at.isoformat() if summary.updated_at else None
+
+    return DashboardProject(
+        id=summary.base_name,
+        title=summary.topic or summary.base_name,
+        topic=summary.topic,
+        language=summary.language,
+        status=status,
+        completed_steps=completed_steps,
+        thumbnail=summary.video_path,
+        updated_at=updated_at,
+    )
 
 
 load_dotenv()
@@ -360,7 +411,39 @@ async def ytdl_download(
     return templates.TemplateResponse("ytdl.html", context)
 
 
+@app.get("/api/dashboard/projects", response_model=List[DashboardProject])
+async def api_dashboard_projects(query: Optional[str] = None) -> List[DashboardProject]:
+    summaries = list_projects(OUTPUT_DIR)
+    projects = [build_dashboard_project(item) for item in summaries]
+
+    if query:
+        q = query.strip().lower()
+        if q:
+            projects = [
+                project
+                for project in projects
+                if q in project.id.lower()
+                or q in project.title.lower()
+                or (project.topic and q in project.topic.lower())
+                or (project.language and q in project.language.lower())
+            ]
+
+    return projects
+
+
 @app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    summaries = list_projects(OUTPUT_DIR)
+    projects = [build_dashboard_project(item).model_dump() for item in summaries]
+
+    context = {
+        "request": request,
+        "projects": projects,
+    }
+    return templates.TemplateResponse("dashboard.html", context)
+
+
+@app.get("/shorts", response_class=HTMLResponse)
 async def index(request: Request):
     selected_base = request.query_params.get("existing")
     project_summaries = list_projects(OUTPUT_DIR)

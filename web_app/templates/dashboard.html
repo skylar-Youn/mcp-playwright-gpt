@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>유튜브 제작기 홈 대시보드</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="header dashboard-header">
+        <div class="brand">
+            <h1>유튜브 제작기</h1>
+            <p class="subtitle">AI 쇼츠 제작기 · 번역기 · 다운로드 도구</p>
+        </div>
+        <div class="dashboard-actions">
+            <a class="btn-outline" href="/ytdl">유튜브 다운로드</a>
+            <a class="btn-outline" href="/shorts">AI 쇼츠 제작기</a>
+            <a class="btn-primary" href="/translator">새 프로젝트 +</a>
+        </div>
+    </header>
+
+    <section class="panel dashboard-search">
+        <label for="dashboard-search-input">프로젝트 검색</label>
+        <input id="dashboard-search-input" type="search" placeholder="제목, 언어 또는 ID로 검색" autocomplete="off">
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>진행 중 프로젝트</h2>
+            <span class="panel-meta" id="project-count">0개</span>
+        </div>
+        <div id="projects-grid" class="projects-grid">
+            <p class="empty-state">프로젝트를 불러오는 중...</p>
+        </div>
+    </section>
+</div>
+
+<script>
+(function () {
+    const searchInput = document.getElementById('dashboard-search-input');
+    const grid = document.getElementById('projects-grid');
+    const countLabel = document.getElementById('project-count');
+    const initialProjects = {{ projects | tojson | safe }};
+
+    function escapeHtml(value) {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatDate(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString('ko-KR', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function projectLink(project) {
+        if (project.project_type === 'translator') {
+            return `/translator/${encodeURIComponent(project.id)}`;
+        }
+        return `/shorts?existing=${encodeURIComponent(project.id)}`;
+    }
+
+    function renderProjects(items) {
+        if (!items.length) {
+            grid.innerHTML = '<p class="empty-state">검색 조건에 맞는 프로젝트가 없습니다.</p>';
+            countLabel.textContent = '0개';
+            return;
+        }
+
+        const html = items.map((item) => {
+            const safeTitle = escapeHtml(item.title || item.id);
+            const safeStatus = escapeHtml(item.status);
+            const subtitle = item.topic && item.topic !== item.title ? escapeHtml(item.topic) : '';
+            const languageLabel = item.language ? escapeHtml(item.language) : '';
+            const updatedAt = escapeHtml(formatDate(item.updated_at));
+
+            const dots = Array.from({ length: item.total_steps }, (_, idx) => {
+                const active = idx < item.completed_steps ? ' is-active' : '';
+                return `<span class="dot${active}"></span>`;
+            }).join('');
+
+            return `
+                <a class="project-card" href="${projectLink(item)}" data-title="${safeTitle.toLowerCase()}">
+                    <div class="thumbnail">
+                        <div class="thumbnail-badge">${escapeHtml((languageLabel || 'N/A').toUpperCase())}</div>
+                    </div>
+                    <div class="project-info">
+                        <h3>${safeTitle}</h3>
+                        ${subtitle ? `<p class="project-topic">${subtitle}</p>` : ''}
+                        <p class="project-status">상태: ${safeStatus}</p>
+                        <div class="progress-dots">${dots}</div>
+                        <p class="project-updated">업데이트: ${updatedAt || '미기록'}</p>
+                    </div>
+                </a>
+            `;
+        }).join('');
+
+        grid.innerHTML = html;
+        countLabel.textContent = `${items.length}개`;
+    }
+
+    function fetchProjects(query) {
+        const url = query ? `/api/dashboard/projects?query=${encodeURIComponent(query)}` : '/api/dashboard/projects';
+        return fetch(url)
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error('목록을 불러오지 못했습니다.');
+                }
+                return res.json();
+            });
+    }
+
+    function handleSearch() {
+        const query = searchInput.value.trim();
+        fetchProjects(query)
+            .then(renderProjects)
+            .catch((err) => {
+                console.error(err);
+                grid.innerHTML = '<p class="empty-state">프로젝트를 불러오는 중 오류가 발생했습니다.</p>';
+                countLabel.textContent = '0개';
+            });
+    }
+
+    searchInput.addEventListener('input', () => {
+        window.clearTimeout(searchInput._timer);
+        searchInput._timer = window.setTimeout(handleSearch, 200);
+    });
+
+    renderProjects(initialProjects);
+})();
+</script>
+</body>
+</html>
