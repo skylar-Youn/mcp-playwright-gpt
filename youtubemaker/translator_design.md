@@ -19,8 +19,11 @@
 
 - 유튜브 다운로드 도구에서 생성된 파일 목록을 불러와 선택 가능.
 - 원본 영상을 유지하거나, 기존 AI 쇼츠 제작기의 에셋(broll, image)을 혼합 가능.
+- 번역 모드에서 사용자 정의 프롬프트/톤을 추가해 AI 번역 품질과 스타일을 조정.
 - 원본 자막을 AI로 번역/재해석; 번역 언어는 한국어/영어/일본어 중 선택.
+- 긴 영상은 자동으로 클립을 분할·배치하고, 필요 시 구간별 번역/렌더링을 순차 처리.
 - 번역 결과를 문장 단위로 편집 가능.
+- 사용자 업로드 영상/자막 파일을 입력으로 받을 수 있도록 고려.
 - 언어별 TTS 음성 생성 (AI 쇼츠 제작기의 TTS 파이프라인 재사용).
 - 배경음악 선택 및 볼륨/덕킹 조절.
 - 최종 영상은 `ai_shorts_maker.outputs` 폴더 하위에 저장하고, 프로젝트 메타데이터 관리.
@@ -79,9 +82,16 @@ AI 쇼츠 제작기 출력(assets/outputs)
 
 - `/` 라우트를 홈 대시보드로 개편하여 번역기·다운로더·쇼츠 제작기 진입점을 통합 제공한다.
 - 대시보드는 `ai_shorts_maker.outputs`와 번역 프로젝트 저장소를 조회해 진행률, 최근 업데이트, 썸네일을 집계한다.
-- 진행도 계산은 번역→TTS→렌더링→검수의 4단계 기준으로 `completed_steps` 값을 저장하고 UI에 ●○ 형태로 전달한다.
+- 진행도 계산은 분할→번역→TTS→렌더링→검수의 5단계 기준으로 `completed_steps` 값을 저장하고 UI에 ●○ 형태로 전달한다.
 - 검색창은 프로젝트 메타데이터(제목, 태그, 언어)를 인덱싱한 경량 캐시를 활용해 실시간 필터링을 지원한다.
 - 홈 카드 클릭 시 해당 프로젝트 유형에 맞춘 상세 페이지(/translator/{id} 또는 /?existing=)로 이동한다.
+
+### 긴 영상 분할 파이프라인
+
+- 번역 프로젝트 생성 시 원본 영상 길이와 자막 타임라인을 기반으로 자동 세그먼트를 생성한다.
+- 각 세그먼트는 최대 30~45초 길이를 권장하며, 사용자 정의 값으로 재조정 가능하다.
+- 분할 작업은 백그라운드 큐(예: asyncio Task + ThreadPool)로 실행하고, 진행 상태를 `segmenting` 단계로 노출한다.
+- 분할 결과는 `TranslatorSegment.clip_index`로 정렬 저장되며, 이후 번역/TTS/렌더링 단계가 세그먼트 단위로 병렬 또는 순차 진행될 수 있다.
 
 ### 백엔드 구성
 
@@ -94,9 +104,12 @@ AI 쇼츠 제작기 출력(assets/outputs)
   - 자막 로딩, 번역 호출, 보이스 파일 관리, 타임라인 변환 담당
   - 기존 `services.py` / `media.py` 유틸 재사용 (특히 렌더링과 타임라인 처리)
 
+- 업로드 처리: `/api/translator/uploads` 엔드포인트 또는 별도 서비스로 사용자 영상/자막 업로드를 허용하고, 안전한 저장 위치(`/uploads`)와 메타데이터를 관리한다.
+
 - 번역 및 음성 합성
   - 번역: `OpenAIShortsClient` 확장 또는 래퍼 (`translate_script` 등)
   - 음성: 기존 `synthesize_voice` 재사용; 언어별 기본 voice 매핑 (예: ko→"alloy", en→"alloy", ja→"gpt-jp-voice")
+  - 긴 영상 분할: 영상 길이/자막 타임라인을 기준으로 클립을 분할하고, 분할된 작업을 큐 기반으로 순차 처리해 자원 사용을 제어한다.
 
 - 비동기 실행
   - 번역과 렌더링은 CPU/네트워크 비용이 있음 → `run_in_threadpool` 사용
@@ -113,12 +126,14 @@ class TranslatorProjectCreate(BaseModel):
     target_lang: Literal["ko", "en", "ja"]
     translation_mode: Literal["literal", "adaptive", "reinterpret"] = "adaptive"
     tone_hint: Optional[str] = None
+    prompt_hint: Optional[str] = None
     fps: Optional[int] = None
     voice: Optional[str] = None
     music_track: Optional[str] = None
 
 class TranslatorSegment(BaseModel):
     id: str
+    clip_index: int
     start: float
     end: float
     source_text: str
@@ -127,9 +142,10 @@ class TranslatorSegment(BaseModel):
 class TranslatorProject(BaseModel):
     id: str
     base_name: str
-    status: Literal["draft", "translated", "voice_ready", "rendered", "failed"]
+    status: Literal["draft", "segmenting", "translating", "voice_ready", "rendering", "rendered", "failed"]
     source_video: str
     source_subtitle: str
+    source_origin: Literal["youtube", "upload"] = "youtube"
     target_lang: str
     segments: list[TranslatorSegment]
     voice_path: Optional[str]
@@ -145,9 +161,9 @@ class DashboardProjectSummary(BaseModel):
     id: str
     title: str
     project_type: Literal["shorts", "translator"]
-    status: Literal["draft", "translated", "voice_ready", "rendering", "rendered", "failed"]
+    status: Literal["draft", "segmenting", "translating", "voice_ready", "rendering", "rendered", "failed"]
     completed_steps: int
-    total_steps: int = 4
+    total_steps: int = 5
     thumbnail: Optional[str]
     updated_at: datetime
 ```
@@ -192,12 +208,14 @@ youtubemaker/
 | GET | `/translator` | 페이지 렌더링 |
 | GET | `/api/dashboard/projects` | 홈 대시보드용 프로젝트/진행도 목록 |
 | GET | `/api/translator/downloads` | `youtube/download` 폴더의 영상/자막 매칭 목록 |
+| POST | `/api/translator/uploads` | 사용자 업로드 영상/자막을 저장하고 프로젝트에 연결 |
 | POST | `/api/translator/projects` | 번역 프로젝트 생성 (`TranslatorProjectCreate`) |
 | GET | `/api/translator/projects/{id}` | 프로젝트 상세 조회 |
 | PATCH | `/api/translator/projects/{id}` | 타임라인/번역텍스트/설정 업데이트 |
 | POST | `/api/translator/projects/{id}/translate` | 번역 실행 (AI 호출, segments 채움) |
 | POST | `/api/translator/projects/{id}/voice` | TTS 생성, 결과 경로 저장 |
 | POST | `/api/translator/projects/{id}/render` | 최종 영상 렌더링 (voice + 영상 + BGM) |
+| POST | `/api/translator/projects/{id}/segments` | 긴 영상 분할/배치 결과를 저장 |
 | GET | `/api/translator/projects/{id}/status` | 장기 작업 상태 폴링 |
 | DELETE | `/api/translator/projects/{id}` | 임시 프로젝트/산출물 삭제 |
 
@@ -234,10 +252,10 @@ youtubemaker/
 ### 쇼츠 번역 및 재해석기 화면
 
 - `소스 선택 패널`: 다운로드된 파일 목록을 썸네일·길이·자막 언어와 함께 표시하고 `.mp4` + `.srt/.vtt` 페어링 기준으로 선택한다.
-- `번역 옵션`: 타깃 언어 토글, 번역 모드(직역/적응/재해석), 톤 입력을 제공하고 "번역 실행" 시 로더를 표시한다.
+- `번역 옵션`: 타깃 언어 토글, 번역 모드(직역/적응/재해석), 톤 입력, 사용자 정의 프롬프트(예: 참고 문장/키워드)를 제공하고 "번역 실행" 시 로더를 표시한다.
 - `번역 결과 테이블`: 타임코드·원문·번역문 3열 편집 UI로, 문장별 재번역 및 저장/취소를 제공한다.
 - `음성 & 음악`: 언어별 기본 음성을 자동 제안하고, 생성된 TTS 미리 듣기와 BGM 선택/볼륨·덕킹 조절 UI를 제공한다.
-- `타임라인 / 미리보기`: 원본 영상/이미지/B-roll을 재배치하고, 섬네일 캡처 버튼을 포함한 간단한 타임라인 컨트롤을 유지한다.
+- `타임라인 / 미리보기`: 원본 영상/이미지/B-roll을 재배치하고, 길이가 긴 영상은 자동 분할된 클립을 타임라인에 배치하며 섹션별 편집을 지원한다. 섬네일 캡처 버튼을 포함한 간단한 타임라인 컨트롤을 유지한다.
 - `결과 다운로드`: 렌더링 진행률, 에러 로그, 완료된 다운로드 링크를 보여주며 홈 대시보드 카드와 상태가 동기화되도록 한다.
 
 ### 추가 고려사항
@@ -245,6 +263,15 @@ youtubemaker/
 - 긴 문장/다국어 텍스트에 대비하기 위해 편집 테이블은 가변 행 높이와 UTF-8 렌더링을 보장한다.
 - 홈 대시보드와 번역기 모두 Fetch API 기반으로 진행 상태를 폴링하며, 오류는 상단 토스트 또는 카드 상태로 노출한다.
 - 접근성(키보드 네비게이션, 스크린 리더) 지원을 위해 ARIA 라벨과 포커스 순서를 명시한다.
+- 사용자 업로드 파일은 업로드 직후 섬네일/자막 미리보기로 확인할 수 있도록 피드백을 제공하고, 용량 제한/보안 검사(예: clamav 연동)를 고려한다.
+
+## 기능 및 UI 확장 제안
+
+- 번역 옵션 패널에 `Custom Prompt` 필드를 추가해 번역 스타일/메시지를 AI에 직접 전달한다.
+- 긴 영상용 `세그먼트 관리` 모듈을 제공해 자동 분할 결과를 시각적으로 조정하고, 필요 시 특정 클립만 재번역/재렌더링한다.
+- 업로드 자산의 진행률/검증 상태를 표시하는 업로드 큐 UI(예: 모달/토스트)를 도입한다.
+- 대시보드 카드에 소스 유형(Youtube/Upload) 배지를 추가해 프로젝트 출처를 한눈에 구분한다.
+- 번역 음성의 언어 라이선스/모델 정보를 카드 툴팁 또는 상세 패널에 노출해 사용자가 정책을 인지하도록 한다.
 
 ## 음성 및 배경음악 처리
 
@@ -253,6 +280,7 @@ youtubemaker/
 - 번역된 자막으로부터 `allocate_caption_timings` 활용하여 타임라인 맞춤
 - 음성 파일은 `outputs/<base_name>.mp3`로 저장, `ProjectMetadata.audio_settings.voice_path` 갱신
 - BGM는 기존 `assets/music` 라이브러리 재활용, 새 트랙 업로드 기능은 차후 검토
+- 다국어 음성 라이선스: 기존 OpenAI 음성 모델 이용 정책을 재확인하고, 필요 시 지역별/언어별 추가 라이선스를 확보한다.
 
 ## 테스트 전략
 
@@ -261,14 +289,16 @@ youtubemaker/
   - 번역 함수: OpenAI 호출 모킹 후 텍스트 정합성 검증
   - 타임라인 병합: 원본 영상 길이와 번역된 타임코드 일치 여부
   - 대시보드 집계: `ProjectMetadata` + 번역 프로젝트를 `DashboardProjectSummary`로 변환하는 로직 검증
+  - 업로드 밸리데이션: 허용 확장자/파일 크기 제한 및 바이러스 스캔 훅 모킹
 
 - 통합 테스트 (선택적)
-  - FastAPI TestClient로 프로젝트 생성→번역→음성→렌더 API 시퀀스 검증
+  - FastAPI TestClient로 프로젝트 생성→번역→음성→렌더 API 시퀀스를 검증하고, 긴 영상 분할 후 렌더까지 이어지는 플로우를 포함한다.
   - `/api/dashboard/projects` 응답이 진행도/검색 파라미터를 반영하는지 검증
 
 - 수동 테스트
   - 실제 다운로드 파일을 활용해 다양한 언어/모드 시나리오 체크
   - 긴 영상/자막, 자막 분량 불일치, 자막 없는 경우 처리
+  - 사용자 업로드 파일 시나리오(대용량, 형식 오류, 다국어 자막)를 점검
   - 홈 대시보드 카드/검색/진행도 표시가 실시간으로 동기화되는지 확인
 
 ## 구현 단계 제안
@@ -281,13 +311,16 @@ youtubemaker/
 2. **데이터/모델 계층**
    - `TranslatorProject` 관련 모델 정의 및 저장 로직 (`repository` 모듈 확장 or 별도)
    - in-memory + JSON 파일 persistence 구현
+   - 업로드 자산(`uploads/`) 및 원본 출처 플래그를 관리하는 스키마/저장소 구성
 
 3. **번역/음성 서비스 구현**
    - OpenAI 호출 래퍼 함수 작성, 재시도/에러 처리 포함
+   - 사용자 프롬프트/톤 파라미터를 번역 요청에 주입하고 템플릿화
    - TTS 생성 파이프라인 연결
 
 4. **타임라인/렌더링 통합**
    - 기존 `media.MediaFactory` 재사용, 필요시 helper 함수 추가
+   - 긴 영상 클립 분할/배치를 위한 세그먼트 생성 로직과 UI 동기화
    - 번역 프로젝트를 `ProjectMetadata`로 변환하는 어댑터 구현
 
 5. **프론트엔드 기능 개발**
@@ -304,7 +337,7 @@ youtubemaker/
 - 번역 모드에 따른 프롬프트 설계 (어느 모델/템플릿 사용?)
 - 긴 영상(>3분) 처리 시 성능 문제 → 클립 분할/배치 요청 전략 필요
 - 사용자 업로드 지원 여부 (현재는 다운로드 파일 한정)
-- 다국어 음성 라이선스/사용 권한 확인
+- 다국어 음성 라이선스/사용 권한 확인 (현 OpenAI 라이선스가 다국어 상업 이용을 커버하는지 재검토하고, 미커버 시 대체 음성 또는 추가 라이선스 협의)
 
 ---
 

@@ -3,11 +3,24 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
+from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Body, FastAPI, Form, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    Body,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -41,6 +54,20 @@ from ai_shorts_maker.services import (
     update_subtitle_style,
     update_subtitle,
 )
+from ai_shorts_maker.translator import (
+    TranslatorProject,
+    TranslatorProjectCreate,
+    TranslatorProjectUpdate,
+    aggregate_dashboard_projects,
+    create_project as translator_create_project,
+    delete_project as translator_delete_project,
+    downloads_listing,
+    ensure_directories as ensure_translator_directories,
+    list_projects as translator_list_projects,
+    load_project as translator_load_project,
+    update_project as translator_update_project,
+    UPLOADS_DIR,
+)
 from youtube.ytdl import download_with_options, parse_sub_langs
 
 
@@ -62,14 +89,15 @@ class SubtitleStyleRequest(BaseModel):
 class DashboardProject(BaseModel):
     id: str
     title: str
-    project_type: Literal["shorts", "translator"] = "shorts"
-    status: Literal["draft", "translating", "voice_ready", "rendering", "rendered", "failed"] = "draft"
-    completed_steps: int
-    total_steps: int = 4
+    project_type: Literal["shorts", "translator"]
+    status: Literal["draft", "segmenting", "translating", "voice_ready", "rendering", "rendered", "failed"]
+    completed_steps: int = 1
+    total_steps: int = 5
     topic: Optional[str] = None
     language: Optional[str] = None
     thumbnail: Optional[str] = None
     updated_at: Optional[str] = None
+    source_origin: Optional[str] = None
 
 
 logger = logging.getLogger(__name__)
