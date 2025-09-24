@@ -96,3 +96,60 @@ def format_timestamp(seconds: float) -> str:
     minutes, remainder = divmod(remainder, 60_000)
     secs, millis = divmod(remainder, 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _parse_timestamp(ts: str) -> float:
+    ts = ts.replace(".", ",")
+    parts = ts.split(",")
+    if len(parts) != 2:
+        time_parts = list(map(int, ts.split(":")))
+        h, m, s = time_parts[-3:]
+        ms = 0
+    else:
+        time_str, ms_str = parts
+        time_parts = list(map(int, time_str.split(":")))
+        h, m, s = time_parts[-3:]
+        ms = int(ms_str)
+
+    return h * 3600 + m * 60 + s + ms / 1000.0
+
+
+TIMECODE_RE = re.compile(r"(\d{1,2}:)?\d{1,2}:\d{1,2}[,.]\d{1,3}\s+-->\s+(\d{1,2}:)?\d{1,2}:\d{1,2}[,.]\d{1,3}")
+
+
+def parse_subtitle_file(path: Path) -> List[CaptionLine]:
+    if not path.exists():
+        return []
+
+    text = path.read_text(encoding="utf-8", errors="ignore").strip()
+    lines = text.splitlines()
+    captions: List[CaptionLine] = []
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line:
+            i += 1
+            continue
+
+        if TIMECODE_RE.match(line):
+            try:
+                start_str, end_str = [p.strip() for p in line.split("-->")]
+                start = _parse_timestamp(start_str)
+                end = _parse_timestamp(end_str)
+
+                i += 1
+                text_block = []
+                while i < len(lines) and lines[i].strip():
+                    text_block.append(lines[i].strip())
+                    i += 1
+                
+                if text_block:
+                    captions.append(CaptionLine(start=start, end=end, text="\n".join(text_block)))
+            except (ValueError, IndexError):
+                # Ignore malformed timecode lines
+                i += 1
+        else:
+            i += 1
+            
+    return captions

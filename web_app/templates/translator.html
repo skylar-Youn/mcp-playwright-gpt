@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>쇼츠 번역 및 재해석기</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="brand">
+                <h1><a href="/">유튜브 제작기</a> / 쇼츠 번역기</h1>
+            </div>
+        </header>
+
+        <div id="project-view" class="hidden">
+            <section class="panel">
+                <div class="panel-header">
+                    <h2 id="project-title"></h2>
+                    <p id="project-status" class="panel-subtitle"></p>
+                </div>
+                <div id="project-actions"></div>
+            </section>
+            <section class="panel">
+                <h3>번역 결과</h3>
+                <div id="segments-table" class="segments-table"></div>
+            </section>
+        </div>
+
+        <div id="creation-view">
+            <section class="panel">
+                <div class="panel-header">
+                    <h2>1. 소스 선택</h2>
+                    <p class="panel-subtitle">번역할 영상과 자막 파일을 선택하세요. 파일은 <code>youtube/download</code> 폴더에서 가져옵니다.</p>
+                </div>
+                <div id="downloads-list" class="downloads-list">
+                    <p class="empty-state">다운로드된 파일을 불러오는 중...</p>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-header">
+                    <h2>2. 번역 설정</h2>
+                </div>
+                <form id="creation-form" class="form-grid">
+                    <div class="form-group">
+                        <label for="target-lang">목표 언어</label>
+                        <select id="target-lang" name="target_lang" class="form-control">
+                            <option value="ko">한국어</option>
+                            <option value="en">English</option>
+                            <option value="ja">日本語</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="translation-mode">번역 모드</label>
+                        <select id="translation-mode" name="translation_mode" class="form-control">
+                            <option value="adaptive">적응형 (기본)</option>
+                            <option value="literal">직역</option>
+                            <option value="reinterpret">재해석</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-full">
+                        <label for="tone-hint">톤/스타일 힌트 (선택 사항)</label>
+                        <input type="text" id="tone-hint" name="tone_hint" class="form-control" placeholder="예: 유머러스하게, 진지하게, 전문가처럼">
+                    </div>
+                    <div class="form-group form-group-full">
+                        <button type="submit" class="btn-primary">번역 프로젝트 생성</button>
+                    </div>
+                </form>
+            </section>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        const creationView = document.getElementById('creation-view');
+        const projectView = document.getElementById('project-view');
+        const downloadsList = document.getElementById('downloads-list');
+        const creationForm = document.getElementById('creation-form');
+        
+        const projectTitle = document.getElementById('project-title');
+        const projectStatus = document.getElementById('project-status');
+        const projectActions = document.getElementById('project-actions');
+        const segmentsTable = document.getElementById('segments-table');
+
+        let selectedSource = null;
+        let currentProject = null;
+
+        function renderDownloads(items) {
+            if (!items.length) {
+                downloadsList.innerHTML = '<p class="empty-state">다운로드된 영상이 없습니다. <a href="/ytdl">유튜브 다운로드</a> 도구를 사용하여 먼저 영상을 받아주세요.</p>';
+                return;
+            }
+            const html = items.map((item, index) => {
+                const hasSubtitle = item.subtitle_path;
+                const videoName = item.base_name;
+                const subtitleName = hasSubtitle ? item.subtitle_path.split('/').pop() : '자막 없음';
+                return `
+                    <div class="download-item" data-index="${index}">
+                        <div class="item-header">
+                            <input type="radio" name="source" id="source-${index}" value='''${JSON.stringify(item)}'''>
+                            <label for="source-${index}">${videoName}</label>
+                        </div>
+                        <div class="item-meta">
+                            <span>${item.video_path}</span>
+                            <span class="${hasSubtitle ? 'text-success' : 'text-warning'}">${subtitleName}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            downloadsList.innerHTML = `<div class="form-group">${html}</div>`;
+            downloadsList.querySelectorAll('input[name="source"]').forEach(radio => {
+                radio.addEventListener('change', (event) => {
+                    selectedSource = JSON.parse(event.target.value);
+                });
+            });
+        }
+
+        function fetchDownloads() {
+            fetch('/api/translator/downloads')
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderDownloads)
+                .catch(err => {
+                    console.error(err);
+                    downloadsList.innerHTML = '<p class="empty-state error">오류가 발생했습니다.</p>';
+                });
+        }
+
+        creationForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (!selectedSource) {
+                alert('번역할 소스 파일을 선택해주세요.');
+                return;
+            }
+            const formData = new FormData(creationForm);
+            const payload = {
+                source_video: selectedSource.video_path,
+                source_subtitle: selectedSource.subtitle_path || null,
+                target_lang: formData.get('target_lang'),
+                translation_mode: formData.get('translation_mode'),
+                tone_hint: formData.get('tone_hint') || null,
+            };
+            const submitButton = creationForm.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
+            submitButton.textContent = '생성 중...';
+            fetch('/api/translator/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+            .then(res => res.ok ? res.json() : Promise.reject(res))
+            .then(project => {
+                window.location.href = `/translator?id=${project.id}`;
+            })
+            .catch(err => {
+                console.error(err);
+                alert('오류가 발생했습니다.');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.textContent = '번역 프로젝트 생성';
+            });
+        });
+
+        function renderProject(project) {
+            currentProject = project;
+            creationView.classList.add('hidden');
+            projectView.classList.remove('hidden');
+
+            projectTitle.textContent = project.base_name;
+            projectStatus.textContent = `상태: ${project.status}`;
+
+            projectActions.innerHTML = ''; // Clear actions
+            if (project.status === 'segmenting' || project.status === 'draft') {
+                projectActions.innerHTML = '<button id="translate-btn" class="btn-primary">번역 실행</button>';
+                document.getElementById('translate-btn').addEventListener('click', runTranslation);
+            } else if (project.status === 'voice_ready') {
+                projectActions.innerHTML = '<button id="voice-btn" class="btn-primary">음성 생성</button>';
+                document.getElementById('voice-btn').addEventListener('click', runVoiceSynthesis);
+            } else if (project.status === 'voice_complete') {
+                projectActions.innerHTML = '<button id="render-btn" class="btn-primary">비디오 렌더링</button>';
+                document.getElementById('render-btn').addEventListener('click', runRender);
+            }
+
+            const segmentsHtml = project.segments.map(seg => `
+                <div class="segment-item">
+                    <div class="segment-time">${seg.start.toFixed(2)} - ${seg.end.toFixed(2)}</div>
+                    <div class="segment-text source">${seg.source_text || ''}</div>
+                    <div class="segment-text translated">${seg.translated_text || ''}</div>
+                </div>
+            `).join('');
+            segmentsTable.innerHTML = segmentsHtml;
+        }
+
+        function runTranslation() {
+            const btn = document.getElementById('translate-btn');
+            btn.disabled = true;
+            btn.textContent = '번역 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/translate`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    alert('번역 실행 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '번역 실행';
+                    }
+                });
+        }
+
+        function runVoiceSynthesis() {
+            const btn = document.getElementById('voice-btn');
+            btn.disabled = true;
+            btn.textContent = '음성 생성 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/voice`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    alert('음성 생성 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '음성 생성';
+                    }
+                });
+        }
+
+        function runRender() {
+            const btn = document.getElementById('render-btn');
+            btn.disabled = true;
+            btn.textContent = '렌더링 중...';
+
+            fetch(`/api/translator/projects/${currentProject.id}/render`, { method: 'POST' })
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(project => {
+                    renderProject(project);
+                    const videoPath = project.extra.rendered_video_path;
+                    if (videoPath) {
+                        const videoLink = document.createElement('a');
+                        videoLink.href = videoPath.replace('/home/sk/ws/mcp-playwright', '');
+                        videoLink.textContent = '다운로드';
+                        videoLink.target = '_blank';
+                        projectActions.appendChild(videoLink);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('렌더링 중 오류가 발생했습니다.');
+                })
+                .finally(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = '비디오 렌더링';
+                    }
+                });
+        }
+
+        function loadProject(id) {
+            fetch(`/api/translator/projects/${id}`)
+                .then(res => res.ok ? res.json() : Promise.reject(res))
+                .then(renderProject)
+                .catch(err => {
+                    console.error(err);
+                    creationView.innerHTML = '<p class="empty-state error">프로젝트를 불러오지 못했습니다.</p>';
+                });
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const projectId = urlParams.get('id');
+
+        if (projectId) {
+            loadProject(projectId);
+        } else {
+            creationView.classList.remove('hidden');
+            projectView.classList.add('hidden');
+            fetchDownloads();
+        }
+    })();
+    </script>
+</body>
+</html>

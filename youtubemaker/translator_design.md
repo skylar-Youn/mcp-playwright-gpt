@@ -342,3 +342,6 @@ youtubemaker/
 ---
 
 본 설계서는 `youtubemaker` 기능 추가를 위한 기초 청사진으로, 구현 과정에서 발견되는 세부 사항은 추후 보완한다.
+
+# Using npx (no installation required)
+npx https://github.com/google-gemini/gemini-cli

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .models import ProjectSummary
 from .repository import OUTPUT_DIR as SHORTS_OUTPUT_DIR
+from .subtitles import parse_subtitle_file, CaptionLine
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class TranslatorProject(BaseModel):
         "segmenting",
         "translating",
         "voice_ready",
+        "voice_complete",
         "rendering",
         "rendered",
         "failed",
@@ -65,6 +67,7 @@ class TranslatorProject(BaseModel):
             "segmenting": 1,
             "translating": 2,
             "voice_ready": 3,
+            "voice_complete": 4,
             "rendering": 4,
             "rendered": 5,
             "failed": 1,
@@ -305,6 +308,186 @@ def aggregate_dashboard_projects(shorts: Iterable[ProjectSummary]) -> List[Dict[
     return translator + shorts_cards
 
 
+def populate_segments_from_subtitles(project: TranslatorProject) -> TranslatorProject:
+    """Load subtitles and populate segment source text."""
+    if not project.source_subtitle:
+        logger.warning("Project %s has no source subtitle file.", project.id)
+        return project
+
+    subtitle_path = Path(project.source_subtitle)
+    if not subtitle_path.exists():
+        logger.error("Subtitle file not found for project %s: %s", project.id, subtitle_path)
+        project.status = "failed"
+        project.extra["error"] = f"Subtitle file not found: {subtitle_path.name}"
+        return save_project(project)
+
+    captions = parse_subtitle_file(subtitle_path)
+    if not captions:
+        logger.warning("No captions found in %s", subtitle_path)
+        return project
+
+    for segment in project.segments:
+        segment_captions = [
+            cap.text
+            for cap in captions
+            if cap.start >= segment.start and cap.end <= segment.end
+        ]
+        segment.source_text = " ".join(segment_captions).strip()
+
+    logger.info("Populated %d segments with source text for project %s", len(project.segments), project.id)
+    return project
+
+
+def translate_project_segments(project_id: str) -> TranslatorProject:
+    """Run translation for all segments in a project."""
+    project = load_project(project_id)
+
+    if project.status not in ["segmenting", "draft"]:
+        logger.warning("Project %s is not in a state to be translated (status: %s)", project_id, project.status)
+        return project
+
+    project = populate_segments_from_subtitles(project)
+    if not any(seg.source_text for seg in project.segments):
+        project.status = "failed"
+        project.extra["error"] = "Could not find any source text in subtitles to translate."
+        return save_project(project)
+
+    project.status = "translating"
+    project = save_project(project)
+
+    try:
+        from .openai_client import OpenAIShortsClient  # Local import to avoid circular dependency issues
+
+        client = OpenAIShortsClient()
+
+        for segment in project.segments:
+            if not segment.source_text:
+                continue
+
+            translated = client.translate_text(
+                text_to_translate=segment.source_text,
+                target_lang=project.target_lang,
+                translation_mode=project.translation_mode,
+                tone_hint=project.tone_hint,
+                prompt_hint=project.prompt_hint,
+            )
+            segment.translated_text = translated
+
+        project.status = "voice_ready"  # Assuming voice is the next step
+        return save_project(project)
+
+    except Exception as e:
+        logger.exception("Failed to translate project %s", project_id)
+        project.status = "failed"
+        project.extra["error"] = str(e)
+        return save_project(project)
+
+
+def synthesize_voice_for_project(project_id: str) -> TranslatorProject:
+    """Generate TTS for the entire translated script."""
+    project = load_project(project_id)
+
+    if project.status != "voice_ready":
+        logger.warning("Project %s is not ready for voice synthesis (status: %s)", project_id, project.status)
+        return project
+
+    full_script = "\n".join([seg.translated_text for seg in project.segments if seg.translated_text])
+    if not full_script:
+        project.status = "failed"
+        project.extra["error"] = "No translated text available to synthesize."
+        return save_project(project)
+
+    project.status = "rendering" # Next logical status
+    project = save_project(project)
+
+    try:
+        from .openai_client import OpenAIShortsClient
+
+        client = OpenAIShortsClient()
+        output_dir = Path(project.metadata_path).parent
+        audio_path = output_dir / f"{project.base_name}_voice.mp3"
+
+        voice = project.voice or "alloy"
+
+        client.synthesize_voice(
+            text=full_script,
+            voice=voice,
+            output_path=audio_path,
+        )
+
+        # In a real app, you might want to store this in a more structured way
+        project.extra["voice_path"] = str(audio_path)
+        project.status = "voice_complete"
+        return save_project(project)
+
+    except Exception as e:
+        logger.exception("Failed to synthesize voice for project %s", project_id)
+        project.status = "failed"
+        project.extra["error"] = str(e)
+        return save_project(project)
+
+
+def render_translated_project(project_id: str) -> TranslatorProject:
+    """Render the final video for a translated project."""
+    project = load_project(project_id)
+
+    if project.status != "voice_complete": # Assuming voice synthesis sets it to this
+        logger.warning("Project %s is not ready for rendering (status: %s)", project_id, project.status)
+        return project
+
+    try:
+        from .media import MediaFactory
+        from moviepy.editor import VideoFileClip
+
+        factory = MediaFactory(assets_dir=SHORTS_OUTPUT_DIR.parent / "assets")
+
+        # 1. Load base video
+        video_clip = VideoFileClip(project.source_video)
+
+        # 2. Attach new audio
+        voice_path = project.extra.get("voice_path")
+        if not voice_path or not Path(voice_path).exists():
+            raise ValueError("Synthesized voice file not found.")
+        
+        video_clip, _ = factory.attach_audio(
+            video_clip,
+            narration_audio=Path(voice_path),
+            use_music=False, # TODO: Make this configurable
+        )
+
+        # 3. Burn subtitles
+        captions = [
+            CaptionLine(start=seg.start, end=seg.end, text=seg.translated_text)
+            for seg in project.segments
+            if seg.translated_text
+        ]
+        video_clip = factory.burn_subtitles(video_clip, captions)
+
+        # 4. Write to file
+        output_dir = Path(project.metadata_path).parent
+        output_path = output_dir / f"{project.base_name}_translated.mp4"
+        
+        video_clip.write_videofile(
+            str(output_path),
+            codec="libx264",
+            audio_codec="aac",
+            temp_audiofile=output_dir / "temp-audio.m4a",
+            remove_temp=True,
+            threads=4, # TODO: Make configurable
+            fps=project.fps or 24,
+        )
+
+        project.extra["rendered_video_path"] = str(output_path)
+        project.status = "rendered"
+        return save_project(project)
+
+    except Exception as e:
+        logger.exception("Failed to render project %s", project_id)
+        project.status = "failed"
+        project.extra["error"] = str(e)
+        return save_project(project)
+
+
 __all__ = [
     "TranslatorSegment",
     "TranslatorProject",
@@ -318,6 +501,9 @@ __all__ = [
     "update_project",
     "downloads_listing",
     "aggregate_dashboard_projects",
+    "translate_project_segments",
+    "synthesize_voice_for_project",
+    "render_translated_project",
     "UPLOADS_DIR",
     "ensure_directories",
 ]

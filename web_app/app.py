@@ -66,6 +66,9 @@ from ai_shorts_maker.translator import (
     list_projects as translator_list_projects,
     load_project as translator_load_project,
     update_project as translator_update_project,
+    translate_project_segments,
+    synthesize_voice_for_project,
+    render_translated_project,
     UPLOADS_DIR,
 )
 from youtube.ytdl import download_with_options, parse_sub_langs
@@ -90,7 +93,7 @@ class DashboardProject(BaseModel):
     id: str
     title: str
     project_type: Literal["shorts", "translator"]
-    status: Literal["draft", "segmenting", "translating", "voice_ready", "rendering", "rendered", "failed"]
+    status: Literal["draft", "segmenting", "translating", "voice_ready", "voice_complete", "rendering", "rendered", "failed"]
     completed_steps: int = 1
     total_steps: int = 5
     topic: Optional[str] = None
@@ -304,6 +307,86 @@ def api_restore_version(base_name: str, version: int) -> ProjectMetadata:
 app.include_router(api_router)
 
 
+translator_router = APIRouter(prefix="/api/translator", tags=["translator"])
+
+
+@translator_router.get("/downloads")
+async def api_list_downloads() -> List[Dict[str, str]]:
+    return downloads_listing()
+
+
+@translator_router.post("/projects", response_model=TranslatorProject)
+async def api_create_translator_project(payload: TranslatorProjectCreate) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(translator_create_project, payload)
+    except Exception as exc:
+        logger.exception("Failed to create translator project")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.get("/projects/{project_id}", response_model=TranslatorProject)
+async def api_get_translator_project(project_id: str) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(translator_load_project, project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@translator_router.patch("/projects/{project_id}", response_model=TranslatorProject)
+async def api_update_translator_project(
+    project_id: str, payload: TranslatorProjectUpdate
+) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(translator_update_project, project_id, payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@translator_router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def api_delete_translator_project(project_id: str) -> None:
+    try:
+        await run_in_threadpool(translator_delete_project, project_id)
+    except FileNotFoundError:
+        pass  # Idempotent delete
+    except Exception as exc:
+        logger.exception("Failed to delete translator project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/translate", response_model=TranslatorProject)
+async def api_translate_project(project_id: str) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(translate_project_segments, project_id)
+    except Exception as exc:
+        logger.exception("Failed to run translation for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/voice", response_model=TranslatorProject)
+async def api_synthesize_voice(project_id: str) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(synthesize_voice_for_project, project_id)
+    except Exception as exc:
+        logger.exception("Failed to run voice synthesis for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/render", response_model=TranslatorProject)
+async def api_render_project(project_id: str) -> TranslatorProject:
+    try:
+        return await run_in_threadpool(render_translated_project, project_id)
+    except Exception as exc:
+        logger.exception("Failed to run render for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+app.include_router(translator_router)
+
+
 def default_ytdl_form() -> Dict[str, Any]:
     settings = load_ytdl_settings()
     return {
@@ -441,34 +524,50 @@ async def ytdl_download(
 
 @app.get("/api/dashboard/projects", response_model=List[DashboardProject])
 async def api_dashboard_projects(query: Optional[str] = None) -> List[DashboardProject]:
-    summaries = list_projects(OUTPUT_DIR)
-    projects = [build_dashboard_project(item) for item in summaries]
+    shorts_summaries = list_projects(OUTPUT_DIR)
+    all_project_data = aggregate_dashboard_projects(shorts_summaries)
+
+    try:
+        all_projects = [DashboardProject(**p) for p in all_project_data]
+    except Exception as e:
+        print(f"Error validating dashboard projects: {e}")
+        print(f"Data: {all_project_data}")
+        all_projects = []
+
 
     if query:
         q = query.strip().lower()
         if q:
-            projects = [
+            all_projects = [
                 project
-                for project in projects
+                for project in all_projects
                 if q in project.id.lower()
                 or q in project.title.lower()
                 or (project.topic and q in project.topic.lower())
                 or (project.language and q in project.language.lower())
             ]
 
-    return projects
+    all_projects.sort(key=lambda p: p.updated_at or "", reverse=True)
+    return all_projects
 
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    summaries = list_projects(OUTPUT_DIR)
-    projects = [build_dashboard_project(item).model_dump() for item in summaries]
+    shorts_summaries = list_projects(OUTPUT_DIR)
+    all_projects = aggregate_dashboard_projects(shorts_summaries)
+    all_projects.sort(key=lambda p: p.get("updated_at"), reverse=True)
 
     context = {
         "request": request,
-        "projects": projects,
+        "projects": all_projects,
     }
     return templates.TemplateResponse("dashboard.html", context)
+
+
+@app.get("/translator", response_class=HTMLResponse)
+async def translator_page(request: Request):
+    context = {"request": request}
+    return templates.TemplateResponse("translator.html", context)
 
 
 @app.get("/shorts", response_class=HTMLResponse)
