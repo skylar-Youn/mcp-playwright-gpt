@@ -327,6 +327,9 @@ class MediaFactory:
         layout_template: str = "classic",
         banner_primary: Optional[str] = None,
         banner_secondary: Optional[str] = None,
+        banner_primary_font_size: Optional[int] = None,
+        banner_secondary_font_size: Optional[int] = None,
+        banner_line_spacing: Optional[int] = None,
     ) -> None:
         self.assets_dir = assets_dir
         self.broll_dir = assets_dir / "broll"
@@ -341,6 +344,9 @@ class MediaFactory:
         self.layout_template = (layout_template or "classic").lower()
         self.banner_primary_text = banner_primary
         self.banner_secondary_text = banner_secondary
+        self.banner_primary_font_size = banner_primary_font_size
+        self.banner_secondary_font_size = banner_secondary_font_size
+        self.banner_line_spacing = banner_line_spacing
 
     # -------------------- B-roll --------------------
     def build_broll_clip(self, duration: float):
@@ -651,7 +657,14 @@ class MediaFactory:
                 banner_bg = banner_bg.with_opacity(0.92)
             banner_bg = _with_position(banner_bg, ("center", 0))
 
-            def _banner_text_clip(text: Optional[str], *, color: str, y_factor: float) -> Optional[VideoClip]:
+            def _banner_text_clip(
+                text: Optional[str],
+                *,
+                color: str,
+                y_factor: float,
+                font_size_override: Optional[int] = None,
+                y_adjust: int = 0,
+            ) -> Optional[VideoClip]:
                 if not text:
                     return None
                 base_kwargs = dict(
@@ -665,7 +678,8 @@ class MediaFactory:
                 def _make_kwargs(include_font: bool):
                     kwargs = dict(base_kwargs)
                     kwargs[_TEXT_PARAM] = text
-                    kwargs[_FONT_SIZE_PARAM] = max(int(self.subtitle_fontsize * 1.05), 48)
+                    size_value = font_size_override or max(int(self.subtitle_fontsize * 1.05), 48)
+                    kwargs[_FONT_SIZE_PARAM] = max(size_value, 1)
                     if include_font and self.subtitle_font:
                         kwargs["font"] = self.subtitle_font
                     return kwargs
@@ -675,11 +689,27 @@ class MediaFactory:
                 except Exception:
                     clip = TextClip(**_make_kwargs(include_font=False))
                 clip = _set_duration(clip, duration_target)
-                y_pos = max(8, int(banner_height * y_factor) - clip.h // 2)
+                y_pos = max(8, int(banner_height * y_factor) - clip.h // 2 + int(y_adjust))
                 return _with_position(clip, ("center", y_pos))
 
-            primary_text = _banner_text_clip(self.banner_primary_text, color="white", y_factor=0.35)
-            secondary_text = _banner_text_clip(self.banner_secondary_text, color="#ffd400", y_factor=0.72)
+            spacing_adjust = int(self.banner_line_spacing or 0)
+            primary_adjust = -math.floor(spacing_adjust / 2)
+            secondary_adjust = math.ceil(spacing_adjust / 2)
+
+            primary_text = _banner_text_clip(
+                self.banner_primary_text,
+                color="white",
+                y_factor=0.35,
+                font_size_override=self.banner_primary_font_size,
+                y_adjust=primary_adjust,
+            )
+            secondary_text = _banner_text_clip(
+                self.banner_secondary_text,
+                color="#ffd400",
+                y_factor=0.72,
+                font_size_override=self.banner_secondary_font_size,
+                y_adjust=secondary_adjust,
+            )
 
             layers.append(banner_bg)
             if primary_text is not None:

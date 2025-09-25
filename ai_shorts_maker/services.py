@@ -210,6 +210,9 @@ def update_subtitle_style(
     template: Optional[str] = None,
     banner_primary_text: Optional[str] = None,
     banner_secondary_text: Optional[str] = None,
+    banner_primary_font_size: Optional[int] | object = UNSET,
+    banner_secondary_font_size: Optional[int] | object = UNSET,
+    banner_line_spacing: Optional[int] | object = UNSET,
 ) -> ProjectMetadata:
     metadata = load_project(base_name)
     style = metadata.subtitle_style
@@ -229,6 +232,12 @@ def update_subtitle_style(
         style.banner_primary_text = banner_primary_text
     if banner_secondary_text is not None:
         style.banner_secondary_text = banner_secondary_text
+    if banner_primary_font_size is not UNSET:
+        style.banner_primary_font_size = banner_primary_font_size
+    if banner_secondary_font_size is not UNSET:
+        style.banner_secondary_font_size = banner_secondary_font_size
+    if banner_line_spacing is not UNSET:
+        style.banner_line_spacing = banner_line_spacing
     _touch(metadata)
     return save_project(metadata)
 
@@ -677,6 +686,9 @@ def render_project(base_name: str, *, burn_subs: bool = False) -> ProjectMetadat
         layout_template=style.template,
         banner_primary=style.banner_primary_text if style.banner_primary_text is not None else metadata.topic,
         banner_secondary=style.banner_secondary_text if style.banner_secondary_text is not None else metadata.style,
+        banner_primary_font_size=style.banner_primary_font_size,
+        banner_secondary_font_size=style.banner_secondary_font_size,
+        banner_line_spacing=style.banner_line_spacing,
     )
     if style.font_path != factory.subtitle_font:
         style.font_path = factory.subtitle_font

@@ -124,21 +124,27 @@ def _migrate_legacy_backup_directories() -> None:
             legacy_metadata = item / "metadata.json"
             target_path = TRANSLATOR_DIR / f"{item.name}.json"
 
-            if not legacy_metadata.exists() or target_path.exists():
+            if not legacy_metadata.exists():
                 continue
+
+            if not target_path.exists():
+                try:
+                    data = json.loads(legacy_metadata.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    logger.warning("Legacy translator backup %s has invalid metadata", legacy_metadata)
+                    continue
+
+                data["metadata_path"] = str(target_path)
+
+                target_path.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                    encoding="utf-8",
+                )
 
             try:
-                data = json.loads(legacy_metadata.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                logger.warning("Legacy translator backup %s has invalid metadata", legacy_metadata)
-                continue
-
-            data["metadata_path"] = str(target_path)
-
-            target_path.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2, default=str),
-                encoding="utf-8",
-            )
+                legacy_metadata.unlink()
+            except OSError as exc:
+                logger.warning("Failed to remove legacy metadata file %s: %s", legacy_metadata, exc)
     except OSError as exc:
         logger.warning("Failed to migrate legacy translator backups: %s", exc)
 

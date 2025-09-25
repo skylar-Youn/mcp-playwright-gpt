@@ -91,6 +91,9 @@ class SubtitleStyleRequest(BaseModel):
     template: Optional[str] = None
     banner_primary_text: Optional[str] = None
     banner_secondary_text: Optional[str] = None
+    banner_primary_font_size: Optional[int] = None
+    banner_secondary_font_size: Optional[int] = None
+    banner_line_spacing: Optional[int] = None
 
 
 class DashboardProject(BaseModel):

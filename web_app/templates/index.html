@@ -67,7 +67,7 @@
 
     <section class="panel">
         <h2>기존 프로젝트 불러오기</h2>
-        <form method="get" action="/" class="existing-form">
+        <form method="get" action="/shorts" class="existing-form">
             <label for="existing">프로젝트 선택</label>
             <select id="existing" name="existing">
                 <option value="">선택하세요</option>
@@ -267,6 +267,9 @@
             <div id="banner-text-wrapper" class="banner-text-wrapper is-hidden">
                 <label>배너 첫 줄 텍스트 <input type="text" id="banner-primary-text" placeholder="예: 모두를 놀라게 한" autocomplete="off"></label>
                 <label>배너 둘째 줄 텍스트 <input type="text" id="banner-secondary-text" placeholder="예: 레전드 시상식 공연" autocomplete="off"></label>
+                <label>첫 줄 글자 크기 <input type="number" min="10" max="200" id="banner-primary-size" placeholder="자동"></label>
+                <label>둘째 줄 글자 크기 <input type="number" min="10" max="200" id="banner-secondary-size" placeholder="자동"></label>
+                <label>두 줄 간격(픽셀) <input type="number" step="1" min="-120" max="240" id="banner-line-spacing" placeholder="0"></label>
             </div>
             <label>애니메이션
                 <select id="subtitle-animation">
@@ -316,8 +319,14 @@ function updateBannerVisibility() {
     wrapper.classList.toggle('is-hidden', !shouldShow);
     const primaryInput = document.getElementById('banner-primary-text');
     const secondaryInput = document.getElementById('banner-secondary-text');
+    const primarySizeInput = document.getElementById('banner-primary-size');
+    const secondarySizeInput = document.getElementById('banner-secondary-size');
+    const spacingInput = document.getElementById('banner-line-spacing');
     if (primaryInput) primaryInput.disabled = !shouldShow;
     if (secondaryInput) secondaryInput.disabled = !shouldShow;
+    if (primarySizeInput) primarySizeInput.disabled = !shouldShow;
+    if (secondarySizeInput) secondarySizeInput.disabled = !shouldShow;
+    if (spacingInput) spacingInput.disabled = !shouldShow;
 }
 
 {% if result %}
@@ -794,6 +803,9 @@ async function updateSubtitleStyle(baseName) {
     const templateSelect = document.getElementById('subtitle-template');
     const bannerPrimaryInput = document.getElementById('banner-primary-text');
     const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+    const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+    const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+    const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
 
     const payload = {};
     if (!Number.isNaN(fontSize)) payload.font_size = fontSize;
@@ -832,6 +844,27 @@ async function updateSubtitleStyle(baseName) {
         const initialSecondary = bannerSecondaryInput.dataset.initial ?? '';
         if (currentSecondary !== initialSecondary) {
             payload.banner_secondary_text = currentSecondary;
+        }
+    }
+    if (bannerPrimarySizeInput) {
+        const currentPrimarySize = bannerPrimarySizeInput.value.trim();
+        const initialPrimarySize = bannerPrimarySizeInput.dataset.initial ?? '';
+        if (currentPrimarySize !== initialPrimarySize) {
+            payload.banner_primary_font_size = currentPrimarySize ? parseInt(currentPrimarySize, 10) : null;
+        }
+    }
+    if (bannerSecondarySizeInput) {
+        const currentSecondarySize = bannerSecondarySizeInput.value.trim();
+        const initialSecondarySize = bannerSecondarySizeInput.dataset.initial ?? '';
+        if (currentSecondarySize !== initialSecondarySize) {
+            payload.banner_secondary_font_size = currentSecondarySize ? parseInt(currentSecondarySize, 10) : null;
+        }
+    }
+    if (bannerLineSpacingInput) {
+        const currentSpacing = bannerLineSpacingInput.value.trim();
+        const initialSpacing = bannerLineSpacingInput.dataset.initial ?? '';
+        if (currentSpacing !== initialSpacing) {
+            payload.banner_line_spacing = currentSpacing ? parseInt(currentSpacing, 10) : null;
         }
     }
 
@@ -1005,6 +1038,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const templateSelect = document.getElementById('subtitle-template');
         const bannerPrimaryInput = document.getElementById('banner-primary-text');
         const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+        const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+        const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+        const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
         if (fontSizeInput) fontSizeInput.value = style.font_size ?? 62;
         if (yOffsetInput) yOffsetInput.value = style.y_offset ?? 0;
         if (strokeWidthInput) strokeWidthInput.value = style.stroke_width ?? 2;
@@ -1033,6 +1069,24 @@ window.addEventListener('DOMContentLoaded', () => {
             const secondaryText = style.banner_secondary_text ?? '';
             bannerSecondaryInput.value = secondaryText;
             bannerSecondaryInput.dataset.initial = secondaryText;
+        }
+        if (bannerPrimarySizeInput) {
+            const primarySize = style.banner_primary_font_size;
+            const primarySizeValue = primarySize ?? '';
+            bannerPrimarySizeInput.value = primarySizeValue;
+            bannerPrimarySizeInput.dataset.initial = primarySizeValue === '' ? '' : String(primarySizeValue);
+        }
+        if (bannerSecondarySizeInput) {
+            const secondarySize = style.banner_secondary_font_size;
+            const secondarySizeValue = secondarySize ?? '';
+            bannerSecondarySizeInput.value = secondarySizeValue;
+            bannerSecondarySizeInput.dataset.initial = secondarySizeValue === '' ? '' : String(secondarySizeValue);
+        }
+        if (bannerLineSpacingInput) {
+            const spacingValue = style.banner_line_spacing;
+            const spacingString = spacingValue ?? '';
+            bannerLineSpacingInput.value = spacingString;
+            bannerLineSpacingInput.dataset.initial = spacingString === '' ? '' : String(spacingString);
         }
         updateBannerVisibility();
         addInitialVersionList();
@@ -1063,6 +1117,9 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         const bannerPrimaryInput = document.getElementById('banner-primary-text');
         const bannerSecondaryInput = document.getElementById('banner-secondary-text');
+        const bannerPrimarySizeInput = document.getElementById('banner-primary-size');
+        const bannerSecondarySizeInput = document.getElementById('banner-secondary-size');
+        const bannerLineSpacingInput = document.getElementById('banner-line-spacing');
         if (bannerPrimaryInput) {
             bannerPrimaryInput.value = '';
             bannerPrimaryInput.dataset.initial = '';
@@ -1070,6 +1127,18 @@ window.addEventListener('DOMContentLoaded', () => {
         if (bannerSecondaryInput) {
             bannerSecondaryInput.value = '';
             bannerSecondaryInput.dataset.initial = '';
+        }
+        if (bannerPrimarySizeInput) {
+            bannerPrimarySizeInput.value = '';
+            bannerPrimarySizeInput.dataset.initial = '';
+        }
+        if (bannerSecondarySizeInput) {
+            bannerSecondarySizeInput.value = '';
+            bannerSecondarySizeInput.dataset.initial = '';
+        }
+        if (bannerLineSpacingInput) {
+            bannerLineSpacingInput.value = '';
+            bannerLineSpacingInput.dataset.initial = '';
         }
         updateBannerVisibility();
         setAutoControls('segment', {}, true);
