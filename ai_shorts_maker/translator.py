@@ -111,6 +111,36 @@ class TranslatorProjectUpdate(BaseModel):
 def ensure_directories() -> None:
     TRANSLATOR_DIR.mkdir(parents=True, exist_ok=True)
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    _migrate_legacy_backup_directories()
+
+
+def _migrate_legacy_backup_directories() -> None:
+    """Copy legacy backup metadata files into the expected location."""
+    try:
+        for item in TRANSLATOR_DIR.iterdir():
+            if not item.is_dir():
+                continue
+
+            legacy_metadata = item / "metadata.json"
+            target_path = TRANSLATOR_DIR / f"{item.name}.json"
+
+            if not legacy_metadata.exists() or target_path.exists():
+                continue
+
+            try:
+                data = json.loads(legacy_metadata.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                logger.warning("Legacy translator backup %s has invalid metadata", legacy_metadata)
+                continue
+
+            data["metadata_path"] = str(target_path)
+
+            target_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+    except OSError as exc:
+        logger.warning("Failed to migrate legacy translator backups: %s", exc)
 
 
 def _project_path(project_id: str) -> Path:
@@ -398,6 +428,31 @@ def delete_project(project_id: str) -> None:
             path.unlink()
         except OSError as exc:
             logger.warning("Failed to delete translator project %s: %s", project_id, exc)
+
+    legacy_dir = TRANSLATOR_DIR / project_id
+    legacy_metadata = legacy_dir / "metadata.json"
+    if legacy_metadata.exists():
+        try:
+            legacy_metadata.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove legacy metadata for %s: %s", project_id, exc)
+
+    if legacy_dir.exists():
+        import shutil
+
+        try:
+            shutil.rmtree(legacy_dir)
+        except OSError as exc:
+            logger.warning("Failed to remove translator assets for %s: %s", project_id, exc)
+
+    versions_dir = TRANSLATOR_DIR / "versions" / project_id
+    if versions_dir.exists():
+        import shutil
+
+        try:
+            shutil.rmtree(versions_dir)
+        except OSError as exc:
+            logger.warning("Failed to remove translator versions for %s: %s", project_id, exc)
 
 
 def update_project(project_id: str, payload: TranslatorProjectUpdate) -> TranslatorProject:
@@ -1325,6 +1380,70 @@ def render_translated_project(project_id: str) -> TranslatorProject:
         return save_project(project)
 
 
+def clone_translator_project(project_id: str) -> TranslatorProject:
+    """번역기 프로젝트를 복제하여 백업본을 생성합니다."""
+    import shutil
+    from datetime import datetime
+
+    ensure_directories()
+
+    # 원본 프로젝트 로드
+    original_project = load_project(project_id)
+
+    # 새 프로젝트 ID 생성 (백업_원본ID_타임스탬프)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    clone_id = f"backup_{project_id}_{timestamp}"
+
+    # 프로젝트 메타데이터 복제
+    cloned_project = TranslatorProject.model_validate(original_project.model_dump())
+    cloned_project.id = clone_id
+    cloned_project.base_name = f"backup_{original_project.base_name}_{timestamp}"
+    cloned_project.created_at = datetime.utcnow()
+    cloned_project.updated_at = datetime.utcnow()
+
+    # 자산 보관 디렉터리 생성
+    assets_dir = TRANSLATOR_DIR / clone_id
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    # 표준 위치에 메타데이터 저장되도록 경로 지정
+    cloned_project.metadata_path = str(_project_path(clone_id))
+
+    # 파일들 복제 (원본 파일이 존재하는 경우)
+    original_video_path = Path(original_project.source_video)
+    if original_video_path.exists():
+        new_video_path = assets_dir / f"{cloned_project.base_name}{original_video_path.suffix}"
+        shutil.copy2(original_video_path, new_video_path)
+        cloned_project.source_video = str(new_video_path)
+
+    if original_project.source_subtitle:
+        original_subtitle_path = Path(original_project.source_subtitle)
+        if original_subtitle_path.exists():
+            new_subtitle_path = assets_dir / f"{cloned_project.base_name}{original_subtitle_path.suffix}"
+            shutil.copy2(original_subtitle_path, new_subtitle_path)
+            cloned_project.source_subtitle = str(new_subtitle_path)
+
+    # 렌더링된 비디오가 있다면 복사
+    if "rendered_video_path" in original_project.extra:
+        original_rendered_path = Path(original_project.extra["rendered_video_path"])
+        if original_rendered_path.exists():
+            new_rendered_path = assets_dir / f"{cloned_project.base_name}_translated.mp4"
+            shutil.copy2(original_rendered_path, new_rendered_path)
+            cloned_project.extra["rendered_video_path"] = str(new_rendered_path)
+
+    # 음성 파일들 복사
+    if "audio_files" in original_project.extra:
+        cloned_project.extra["audio_files"] = {}
+        for key, audio_path in original_project.extra["audio_files"].items():
+            if audio_path and Path(audio_path).exists():
+                original_audio_path = Path(audio_path)
+                new_audio_path = assets_dir / f"{cloned_project.base_name}_{key}{original_audio_path.suffix}"
+                shutil.copy2(original_audio_path, new_audio_path)
+                cloned_project.extra["audio_files"][key] = str(new_audio_path)
+
+    # 복제된 프로젝트 저장
+    return save_project(cloned_project)
+
+
 __all__ = [
     "TranslatorSegment",
     "TranslatorProject",
@@ -1336,6 +1455,7 @@ __all__ = [
     "list_projects",
     "delete_project",
     "update_project",
+    "clone_translator_project",
     "downloads_listing",
     "aggregate_dashboard_projects",
     "generate_ai_commentary_for_project",

@@ -38,6 +38,7 @@ from ai_shorts_maker.models import (
     TimelineUpdate,
 )
 from ai_shorts_maker.repository import (
+    clone_project,
     delete_project as repository_delete_project,
     list_projects,
     load_project,
@@ -59,6 +60,7 @@ from ai_shorts_maker.translator import (
     TranslatorProjectCreate,
     TranslatorProjectUpdate,
     aggregate_dashboard_projects,
+    clone_translator_project,
     create_project as translator_create_project,
     delete_project as translator_delete_project,
     downloads_listing,
@@ -272,6 +274,17 @@ def api_delete_project(base_name: str) -> JSONResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+
+@api_router.post("/projects/{base_name}/clone", response_model=ProjectMetadata)
+def api_clone_project(base_name: str) -> ProjectMetadata:
+    """프로젝트를 복제하여 백업본을 생성합니다."""
+    try:
+        return clone_project(base_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @api_router.post("/projects/{base_name}/render", response_model=ProjectMetadata)
@@ -589,6 +602,18 @@ async def api_update_voice_synthesis_mode(project_id: str, payload: Dict[str, An
 
     except Exception as exc:
         logger.exception("Failed to update voice synthesis mode for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@translator_router.post("/projects/{project_id}/clone")
+async def api_clone_translator_project(project_id: str):
+    """번역기 프로젝트를 복제하여 백업본을 생성합니다."""
+    try:
+        return await run_in_threadpool(clone_translator_project, project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to clone translator project %s", project_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

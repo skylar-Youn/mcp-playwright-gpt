@@ -96,7 +96,7 @@
             const showVideoEditButton = item.project_type === 'translator' && item.completed_steps >= 2;
 
             return `
-                <a class="project-card" href="${projectLink(item)}" data-title="${safeTitle.toLowerCase()}">
+                <a class="project-card" href="${projectLink(item)}" data-title="${safeTitle.toLowerCase()}" data-project-type="${item.project_type}">
                     <div class="thumbnail">
                         <div class="thumbnail-badge">${escapeHtml((languageLabel || 'N/A').toUpperCase())}</div>
                     </div>
@@ -106,11 +106,13 @@
                         <p class="project-status">상태: ${safeStatus}</p>
                         <div class="progress-dots">${dots}</div>
                         <p class="project-updated">업데이트: ${updatedAt || '미기록'}</p>
-                        ${showVideoEditButton ?
-                            `<div class="project-actions">
-                                <button class="btn-video-edit" onclick="event.preventDefault(); openVideoEditor('${item.id}')">영상편집</button>
-                            </div>` : ''
-                        }
+                        <div class="project-actions">
+                            ${showVideoEditButton ?
+                                `<button class="btn-video-edit" onclick="event.preventDefault(); openVideoEditor('${item.id}')">영상편집</button>` : ''
+                            }
+                            <button class="btn-clone" onclick="event.preventDefault(); cloneProject('${item.id}')">복제하기</button>
+                            <button class="btn-delete" onclick="event.preventDefault(); deleteProject('${item.id}')">삭제하기</button>
+                        </div>
                     </div>
                 </a>
             `;
@@ -510,6 +512,95 @@
             modal.style.display = 'none';
         }
     };
+
+    // 프로젝트 복제 함수
+    window.cloneProject = function(projectId) {
+        if (!confirm('프로젝트를 복제하시겠습니까? 복제된 프로젝트는 "backup_" 접두사가 붙습니다.')) {
+            return;
+        }
+
+        // 복제 중임을 표시
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '복제 중...';
+        btn.disabled = true;
+
+        // 프로젝트 카드에서 project_type 정보를 가져옴
+        const projectCard = btn.closest('.project-card');
+        const projectType = projectCard ? projectCard.dataset.projectType : null;
+
+        // 프로젝트 타입에 따라 적절한 API 엔드포인트 선택
+        let apiUrl;
+        if (projectType === 'translator') {
+            apiUrl = `/api/translator/projects/${encodeURIComponent(projectId)}/clone`;
+        } else {
+            apiUrl = `/api/projects/${encodeURIComponent(projectId)}/clone`;
+        }
+
+        fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`복제 실패: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            const clonedId = data.id || data.base_name;
+            alert(`프로젝트가 성공적으로 복제되었습니다!\n복제된 프로젝트 ID: ${clonedId}`);
+            // 페이지 새로고침하여 복제된 프로젝트 표시
+            window.location.reload();
+        })
+        .catch(error => {
+            console.error('복제 오류:', error);
+            alert('프로젝트 복제 중 오류가 발생했습니다: ' + error.message);
+        })
+        .finally(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        });
+    };
+
+    window.deleteProject = function(projectId) {
+        if (!confirm('선택한 프로젝트를 삭제하시겠습니까? 삭제 후에는 되돌릴 수 없습니다.')) {
+            return;
+        }
+
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '삭제 중...';
+        btn.disabled = true;
+
+        const projectCard = btn.closest('.project-card');
+        const projectType = projectCard ? projectCard.dataset.projectType : null;
+
+        const apiUrl = projectType === 'translator'
+            ? `/api/translator/projects/${encodeURIComponent(projectId)}`
+            : `/api/projects/${encodeURIComponent(projectId)}`;
+
+        fetch(apiUrl, {
+            method: 'DELETE'
+        })
+        .then(response => {
+            if (!response.ok && response.status !== 204) {
+                throw new Error(`삭제 실패: ${response.status}`);
+            }
+            alert('프로젝트가 삭제되었습니다.');
+            window.location.reload();
+        })
+        .catch(error => {
+            console.error('삭제 오류:', error);
+            alert('프로젝트 삭제 중 오류가 발생했습니다: ' + error.message);
+        })
+        .finally(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        });
+    };
 })();
 </script>
 
@@ -535,6 +626,52 @@
 .btn-video-edit:hover {
     background: #7ee0ff;
     transform: translateY(-1px);
+}
+
+.btn-clone {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-clone:hover:not(:disabled) {
+    background: #34ce57;
+    transform: translateY(-1px);
+}
+
+.btn-clone:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-delete {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-delete:hover:not(:disabled) {
+    background: #f15b6b;
+    transform: translateY(-1px);
+}
+
+.btn-delete:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .video-editor-modal {

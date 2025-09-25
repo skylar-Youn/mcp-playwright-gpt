@@ -217,3 +217,49 @@ def load_project_version(base_name: str, version: int, output_dir: Optional[Path
         raise FileNotFoundError(f"Version {version} for {base_name} not found")
     data = json.loads(version_path.read_text(encoding="utf-8"))
     return ProjectMetadata.model_validate(data)
+
+
+def clone_project(base_name: str, output_dir: Optional[Path] = None) -> ProjectMetadata:
+    """프로젝트를 복제하여 백업본을 생성합니다."""
+    import shutil
+    from datetime import datetime
+    from uuid import uuid4
+
+    directory = output_dir or OUTPUT_DIR
+
+    # 원본 프로젝트 로드
+    original_project = load_project(base_name, directory)
+
+    # 새 프로젝트 이름 생성 (백업_원본이름_타임스탬프)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    clone_name = f"backup_{base_name}_{timestamp}"
+
+    # 프로젝트 메타데이터 복제
+    cloned_project = ProjectMetadata.model_validate(original_project.model_dump())
+    cloned_project.base_name = clone_name
+    cloned_project.created_at = datetime.utcnow()
+    cloned_project.updated_at = datetime.utcnow()
+
+    # 파일들 복제
+    file_paths = [
+        ("video_path", original_project.video_path),
+        ("audio_path", original_project.audio_path),
+        ("subtitles_path", original_project.subtitles_path),
+        ("script_path", original_project.script_path),
+    ]
+
+    for field_name, original_path in file_paths:
+        if original_path and Path(original_path).exists():
+            original_file = Path(original_path)
+            # 새 파일명 생성
+            new_filename = f"{clone_name}{original_file.suffix}"
+            new_path = directory / new_filename
+
+            # 파일 복사
+            shutil.copy2(original_file, new_path)
+
+            # 메타데이터의 경로 업데이트
+            setattr(cloned_project, field_name, str(new_path))
+
+    # 복제된 프로젝트 저장
+    return save_project(cloned_project, directory)
