@@ -1,0 +1,16 @@
+# YouTube Hot Finder 통합 버전 필수 라이브러리
+PyQt5>=5.15.0
+
+# 선택 1: Google API 사용 (빠름, 할당량 제한)
+# 이 라이브러리들이 있으면 API 모드 사용 가능
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=0.4.0
+google-auth-httplib2>=0.1.0
+
+# 선택 2: yt-dlp 사용 (느림, 무제한)
+# 이 라이브러리가 있으면 스크래핑 모드 사용 가능
+yt-dlp>=2023.0.0
+
+# 둘 다 설치하면 설정에서 선택하거나 자동으로 전환 가능
+# 둘 중 하나만 설치해도 작동함

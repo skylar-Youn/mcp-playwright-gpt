@@ -10,3 +10,9 @@ youtube/__pycache__/*
 youtube/download/*
 youtube/old
 *.png
+old/*
+test*
+*.xlsx
+*.csv
+*.json
+*.md 
