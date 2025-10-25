@@ -2,17 +2,26 @@ node_modules/*
 .env
 .env.example
 .venv/*
-ai_shorts_maker/__pycache__
-web_app/__pycache__
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Log files
+logs/
+*.log
+
 ai_shorts_maker/outputs/*
 ai_shorts_maker/assets
-youtube/__pycache__/*
 youtube/download/*
 youtube/old
 *.png
 old/*
 test*
 *.xlsx
-*.csv
 *.json
-*.md 
+*.md
+*.csv
+*.txt
