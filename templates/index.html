@@ -390,6 +390,13 @@
 
                 <div class="form-group">
                     <div class="checkbox-group">
+                        <input type="checkbox" id="use-stealth" {{ 'checked' if config.use_stealth else '' }}>
+                        <label>스텔스 모드 사용 (봇 감지 회피)</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
                         <input type="checkbox" id="use-proxy" {{ 'checked' if config.use_proxy else '' }}>
                         <label>프록시 사용</label>
                     </div>
@@ -539,6 +546,7 @@
                 max_price: parseInt(document.getElementById('max-price').value) || 999999999,
                 exclude_rocket: document.getElementById('exclude-rocket').checked,
                 exclude_rocket_direct: document.getElementById('exclude-rocket-direct').checked,
+                use_stealth: document.getElementById('use-stealth').checked,
                 use_proxy: document.getElementById('use-proxy').checked,
                 proxy_server: document.getElementById('proxy-server').value,
                 min_delay: parseFloat(document.getElementById('min-delay').value),
@@ -637,6 +645,7 @@
                 max_price: parseInt(document.getElementById('max-price').value) || 999999999,
                 exclude_rocket: document.getElementById('exclude-rocket').checked,
                 exclude_rocket_direct: document.getElementById('exclude-rocket-direct').checked,
+                use_stealth: document.getElementById('use-stealth').checked,
                 use_proxy: document.getElementById('use-proxy').checked,
                 proxy_server: document.getElementById('proxy-server').value,
                 min_delay: parseFloat(document.getElementById('min-delay').value),
@@ -668,6 +677,87 @@
         function clearLogs() {
             document.getElementById('log-container').innerHTML = '';
             addLog('info', '로그가 지워졌습니다');
+        }
+
+        // 페이지 로드 시 로컬스토리지에서 설정 불러오기
+        window.addEventListener('DOMContentLoaded', function() {
+            // 로컬스토리지에서 설정 불러오기
+            const savedSettings = localStorage.getItem('coupang_settings');
+            if (savedSettings) {
+                try {
+                    const settings = JSON.parse(savedSettings);
+
+                    // 각 입력 필드에 값 적용
+                    if (settings.max_results !== undefined)
+                        document.getElementById('max-results').value = settings.max_results;
+                    if (settings.min_price !== undefined)
+                        document.getElementById('min-price').value = settings.min_price;
+                    if (settings.max_price !== undefined)
+                        document.getElementById('max-price').value = settings.max_price;
+                    if (settings.exclude_rocket !== undefined)
+                        document.getElementById('exclude-rocket').checked = settings.exclude_rocket;
+                    if (settings.exclude_rocket_direct !== undefined)
+                        document.getElementById('exclude-rocket-direct').checked = settings.exclude_rocket_direct;
+                    if (settings.use_stealth !== undefined)
+                        document.getElementById('use-stealth').checked = settings.use_stealth;
+                    if (settings.use_proxy !== undefined)
+                        document.getElementById('use-proxy').checked = settings.use_proxy;
+                    if (settings.proxy_server !== undefined)
+                        document.getElementById('proxy-server').value = settings.proxy_server;
+                    if (settings.min_delay !== undefined)
+                        document.getElementById('min-delay').value = settings.min_delay;
+                    if (settings.max_delay !== undefined)
+                        document.getElementById('max-delay').value = settings.max_delay;
+                    if (settings.scroll_delay !== undefined)
+                        document.getElementById('scroll-delay').value = settings.scroll_delay;
+                    if (settings.initial_wait !== undefined)
+                        document.getElementById('initial-wait').value = settings.initial_wait;
+                    if (settings.headless !== undefined)
+                        document.getElementById('headless').checked = settings.headless;
+
+                    console.log('로컬스토리지에서 설정 불러옴');
+                } catch (e) {
+                    console.error('설정 불러오기 실패:', e);
+                }
+            }
+
+            // 입력 필드 변경 시 자동 저장
+            const inputIds = [
+                'max-results', 'min-price', 'max-price', 'exclude-rocket',
+                'exclude-rocket-direct', 'use-stealth', 'use-proxy', 'proxy-server',
+                'min-delay', 'max-delay', 'scroll-delay', 'initial-wait', 'headless'
+            ];
+
+            inputIds.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('change', function() {
+                        saveToLocalStorage();
+                    });
+                }
+            });
+        });
+
+        // 로컬스토리지에 설정 저장
+        function saveToLocalStorage() {
+            const settings = {
+                max_results: parseInt(document.getElementById('max-results').value),
+                min_price: parseInt(document.getElementById('min-price').value) || 0,
+                max_price: parseInt(document.getElementById('max-price').value) || 999999999,
+                exclude_rocket: document.getElementById('exclude-rocket').checked,
+                exclude_rocket_direct: document.getElementById('exclude-rocket-direct').checked,
+                use_stealth: document.getElementById('use-stealth').checked,
+                use_proxy: document.getElementById('use-proxy').checked,
+                proxy_server: document.getElementById('proxy-server').value,
+                min_delay: parseFloat(document.getElementById('min-delay').value),
+                max_delay: parseFloat(document.getElementById('max-delay').value),
+                scroll_delay: parseFloat(document.getElementById('scroll-delay').value),
+                initial_wait: parseFloat(document.getElementById('initial-wait').value),
+                headless: document.getElementById('headless').checked
+            };
+
+            localStorage.setItem('coupang_settings', JSON.stringify(settings));
+            console.log('로컬스토리지에 설정 저장됨');
         }
     </script>
 </body>

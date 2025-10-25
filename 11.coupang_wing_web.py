@@ -71,7 +71,8 @@ def load_config():
         'min_delay': 2.0,
         'max_delay': 5.0,
         'scroll_delay': 1.5,
-        'initial_wait': 3.0
+        'initial_wait': 3.0,
+        'use_stealth': True  # 스텔스 모드 기본값
     }
 
     if os.path.exists(CONFIG_FILE):
@@ -113,9 +114,28 @@ def emit_log(level, message):
         app.logger.info(message)
 
 
+async def smooth_scroll(page, start=0, end=None, steps=10):
+    """사람처럼 부드럽게 스크롤하는 함수"""
+    import random
+
+    if end is None:
+        end = await page.evaluate("() => document.body.scrollHeight")
+
+    step_size = (end - start) / steps
+    current = start
+
+    for _ in range(steps):
+        # 약간의 랜덤성을 추가하여 자연스러운 스크롤 구현
+        current += step_size + random.uniform(-100, 100)
+        current = min(current, end)
+        await page.evaluate(f"window.scrollTo(0, {current})")
+        await asyncio.sleep(random.uniform(0.3, 0.7))
+
+
 async def scrape_coupang(search_params):
-    """쿠팡 스크래핑 (에러 트래킹 포함)"""
+    """쿠팡 스크래핑 (개선된 버전 - 봇 감지 회피)"""
     global scraping_results, is_scraping
+    import random
 
     results = []
     query = search_params['query']
@@ -137,35 +157,15 @@ async def scrape_coupang(search_params):
                         '--no-sandbox',
                         '--disable-http2',  # HTTP/2 비활성화 (프로토콜 오류 방지)
                         '--disable-gpu',
+                        '--window-size=1920,1080',
+                        '--disable-extensions',
+                        '--disable-setuid-sandbox',
                         '--disable-web-security',
                         '--disable-features=IsolateOrigins,site-per-process',
-                        '--disable-setuid-sandbox',
-                        '--disable-background-networking',
-                        '--disable-background-timer-throttling',
-                        '--disable-backgrounding-occluded-windows',
-                        '--disable-breakpad',
-                        '--disable-client-side-phishing-detection',
-                        '--disable-component-extensions-with-background-pages',
-                        '--disable-default-apps',
-                        '--disable-extensions',
-                        '--disable-features=Translate',
-                        '--disable-hang-monitor',
-                        '--disable-ipc-flooding-protection',
-                        '--disable-popup-blocking',
-                        '--disable-prompt-on-repost',
-                        '--disable-renderer-backgrounding',
-                        '--disable-sync',
-                        '--force-color-profile=srgb',
-                        '--metrics-recording-only',
-                        '--no-first-run',
-                        '--enable-automation',
-                        '--password-store=basic',
-                        '--use-mock-keychain',
-                        '--enable-features=NetworkService,NetworkServiceInProcess',
-                        '--window-size=1920,1080'
+                        '--incognito'  # 시크릿 모드
                     ]
                 )
-                emit_log('success', '브라우저 실행 완료 (HTTP/2 비활성화)')
+                emit_log('success', '브라우저 실행 완료 (시크릿 모드, HTTP/2 비활성화)')
             except Exception as e:
                 emit_log('error', f'브라우저 실행 실패: {str(e)}')
                 raise
@@ -193,36 +193,33 @@ async def scrape_coupang(search_params):
                 raise
 
             # 스텔스 모드 적용 (봇 감지 우회) - context에 적용
-            if STEALTH_AVAILABLE:
+            if search_params.get('use_stealth', True) and STEALTH_AVAILABLE:
                 stealth_config = Stealth(
                     navigator_languages_override=('ko-KR', 'ko'),
                     navigator_user_agent_override=None  # 자동 설정
                 )
                 await stealth_config.apply_stealth_async(context)
                 emit_log('success', '스텔스 모드 활성화 완료')
-            else:
+            elif search_params.get('use_stealth', True) and not STEALTH_AVAILABLE:
                 emit_log('warning', 'playwright-stealth 미설치 (기본 모드)')
-                # 웹드라이버 감지 방지 (스텔스 모드가 없을 때만)
-                await context.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    window.navigator.chrome = { runtime: {} };
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5]
-                    });
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['ko-KR', 'ko', 'en-US', 'en']
-                    });
-                """)
+            else:
+                emit_log('info', '스텔스 모드 비활성화 (사용자 설정)')
 
             page = await context.new_page()
 
             try:
-                # 메인 페이지 방문 건너뛰고 바로 검색 페이지로 이동
-                # (HTTP2_PROTOCOL_ERROR 우회)
-                search_url = f"https://www.coupang.com/np/search?q={query}"
+                # 검색 URL 구성
+                import urllib.parse
+                encoded_query = urllib.parse.quote(query)
+                search_url = f"https://www.coupang.com/np/search?component=&q={encoded_query}&channel=user"
+
                 emit_log('info', f'검색 페이지 접속 중: {query}')
+
+                # 쿠키 삭제
+                await context.clear_cookies()
+
+                # 사람처럼 랜덤한 대기 시간 추가
+                await asyncio.sleep(random.uniform(2, 4))
 
                 # 여러 번 시도 (재시도 로직)
                 max_retries = 3
@@ -230,7 +227,7 @@ async def scrape_coupang(search_params):
                     try:
                         await page.goto(
                             search_url,
-                            wait_until='networkidle',
+                            wait_until='domcontentloaded',
                             timeout=60000
                         )
                         emit_log('success', '검색 페이지 접속 완료')
@@ -243,29 +240,59 @@ async def scrape_coupang(search_params):
                             emit_log('error', f'최대 재시도 횟수 초과: {str(e)}')
                             raise
 
-                # 초기 대기
-                initial_wait = search_params.get('initial_wait', 3.0)
-                emit_log('info', f'페이지 로딩 대기 중... ({initial_wait:.1f}초)')
-                await asyncio.sleep(initial_wait)
+                # 페이지 로드 후 자연스러운 대기
+                await asyncio.sleep(random.uniform(3, 5))
 
-                # 딜레이
-                import random
-                delay = random.uniform(
-                    search_params.get('min_delay', 2.0),
-                    search_params.get('max_delay', 5.0)
-                )
-                await asyncio.sleep(delay)
+                # 페이지 로드 상태 확인
+                page_state = await page.evaluate('document.readyState')
+                emit_log('info', f'페이지 로드 상태: {page_state}')
 
-                # 스크롤
-                emit_log('info', '페이지 스크롤 중...')
-                for _ in range(3):
-                    await page.evaluate('window.scrollBy(0, 200)')
-                    await asyncio.sleep(random.uniform(0.3, 0.7))
+                # 봇 탐지 확인
+                page_content = await page.content()
+                if "보안 검사 중입니다" in page_content or "캡차" in page_content:
+                    emit_log('warning', '봇 탐지 감지됨. 잠시 대기 후 재시도...')
+                    await asyncio.sleep(random.uniform(15, 30))
+
+                # 자연스러운 스크롤 동작
+                viewport_height = await page.evaluate("window.innerHeight")
+                total_height = await page.evaluate("document.body.scrollHeight")
+
+                emit_log('info', '자연스러운 스크롤 시작...')
+
+                # 중간 중간 멈추면서 스크롤
+                current_position = 0
+                while current_position < total_height:
+                    # 다음 스크롤 위치 계산 (랜덤성 추가)
+                    scroll_amount = random.randint(300, 700)
+                    next_position = min(current_position + scroll_amount, total_height)
+
+                    # 부드럽게 스크롤
+                    await smooth_scroll(page, current_position, next_position)
+
+                    # 스크롤 후 잠시 대기 (컨텐츠 로딩 대기)
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+
+                    # 가끔 위로 살짝 스크롤 (사람처럼 보이게)
+                    if random.random() < 0.2:  # 20% 확률
+                        back_scroll = random.randint(100, 300)
+                        await page.evaluate(f"window.scrollBy(0, -{back_scroll})")
+                        await asyncio.sleep(random.uniform(0.3, 0.7))
+
+                    current_position = next_position
+
                 emit_log('success', '스크롤 완료')
+
+                # 요소 찾기 전 자연스러운 대기
+                await asyncio.sleep(random.uniform(1, 2))
 
                 # 제품 목록 대기
                 emit_log('info', '제품 목록 로드 대기 중...')
-                await page.wait_for_selector('li.search-product', timeout=30000)
+                try:
+                    await page.wait_for_selector('li.search-product', timeout=30000)
+                except:
+                    emit_log('warning', '상품 목록을 찾을 수 없습니다.')
+                    await browser.close()
+                    return results
 
                 # 제품 수집
                 emit_log('info', '제품 정보 수집 중...')
@@ -277,19 +304,22 @@ async def scrape_coupang(search_params):
                     await browser.close()
                     return results
 
-                # 제품 처리
-                for idx, product in enumerate(products[:max_results * 2]):
-                    try:
-                        # 필터링
-                        is_rocket = await product.query_selector('.badge.rocket') is not None
-                        is_rocket_direct = await product.query_selector('.badge.rocket-direct') is not None
-                        is_rocket_global = await product.query_selector('.badge.rocket-global') is not None
-                        is_rocket_fresh = await product.query_selector('.badge.rocket-fresh') is not None
+                # 제품 처리 (광고 제외)
+                non_ad_rank = 0
+                ad_count = 0
 
-                        if search_params.get('exclude_rocket', True) and is_rocket:
+                for idx, product in enumerate(products):
+                    try:
+                        # 광고 상품 체크
+                        class_attr = await product.get_attribute('class')
+                        is_ad = 'search-product__ad' in (class_attr or '')
+
+                        if is_ad:
+                            ad_count += 1
+                            emit_log('info', f'광고 상품 발견: {ad_count}번째 광고')
                             continue
-                        if search_params.get('exclude_rocket_direct', True) and (is_rocket_direct or is_rocket_global or is_rocket_fresh):
-                            continue
+
+                        non_ad_rank += 1
 
                         # 제품 정보 추출
                         name_elem = await product.query_selector('.name')
@@ -303,6 +333,17 @@ async def scrape_coupang(search_params):
                         min_price = search_params.get('min_price', 0)
                         max_price = search_params.get('max_price', 999999999)
                         if price < min_price or price > max_price:
+                            continue
+
+                        # 필터링
+                        is_rocket = await product.query_selector('.badge.rocket') is not None
+                        is_rocket_direct = await product.query_selector('.badge.rocket-direct') is not None
+                        is_rocket_global = await product.query_selector('.badge.rocket-global') is not None
+                        is_rocket_fresh = await product.query_selector('.badge.rocket-fresh') is not None
+
+                        if search_params.get('exclude_rocket', True) and is_rocket:
+                            continue
+                        if search_params.get('exclude_rocket_direct', True) and (is_rocket_direct or is_rocket_global or is_rocket_fresh):
                             continue
 
                         # URL
@@ -333,6 +374,7 @@ async def scrape_coupang(search_params):
                             seller_type = "로켓프레시"
 
                         results.append({
+                            'rank': non_ad_rank,  # 광고 제외 순위
                             'name': name.strip(),
                             'price': price,
                             'seller_type': seller_type,
@@ -341,7 +383,7 @@ async def scrape_coupang(search_params):
                             'url': product_url
                         })
 
-                        emit_log('info', f'처리 중... {len(results)}개 제품 발견')
+                        emit_log('info', f'처리 중... {len(results)}개 제품 발견 (광고 제외 순위: {non_ad_rank})')
 
                         # 실시간 결과 전송
                         socketio.emit('result_update', {
@@ -358,7 +400,7 @@ async def scrape_coupang(search_params):
 
                 # 가격 순 정렬
                 results.sort(key=lambda x: x['price'])
-                emit_log('success', f'검색 완료! 총 {len(results)}개 제품 수집')
+                emit_log('success', f'검색 완료! 총 {len(results)}개 제품 수집 (광고 {ad_count}개 제외)')
 
             except Exception as e:
                 emit_log('error', f'페이지 처리 중 오류: {str(e)}\n{traceback.format_exc()}')
