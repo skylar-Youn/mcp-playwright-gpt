@@ -21,11 +21,14 @@ from logging.handlers import RotatingFileHandler
 
 try:
     from playwright.async_api import async_playwright
-    from playwright_stealth import stealth_async
     PLAYWRIGHT_AVAILABLE = True
-    STEALTH_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
+
+try:
+    from playwright_stealth import Stealth
+    STEALTH_AVAILABLE = True
+except ImportError:
     STEALTH_AVAILABLE = False
 
 # Flask 앱 설정
@@ -189,28 +192,31 @@ async def scrape_coupang(search_params):
                 await browser.close()
                 raise
 
-            # 웹드라이버 감지 방지
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                window.navigator.chrome = { runtime: {} };
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['ko-KR', 'ko', 'en-US', 'en']
-                });
-            """)
-
-            page = await context.new_page()
-
-            # 스텔스 모드 적용 (봇 감지 우회)
+            # 스텔스 모드 적용 (봇 감지 우회) - context에 적용
             if STEALTH_AVAILABLE:
-                await stealth_async(page)
+                stealth_config = Stealth(
+                    navigator_languages_override=('ko-KR', 'ko'),
+                    navigator_user_agent_override=None  # 자동 설정
+                )
+                await stealth_config.apply_stealth_async(context)
                 emit_log('success', '스텔스 모드 활성화 완료')
             else:
                 emit_log('warning', 'playwright-stealth 미설치 (기본 모드)')
+                # 웹드라이버 감지 방지 (스텔스 모드가 없을 때만)
+                await context.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    window.navigator.chrome = { runtime: {} };
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['ko-KR', 'ko', 'en-US', 'en']
+                    });
+                """)
+
+            page = await context.new_page()
 
             try:
                 # 메인 페이지 방문 건너뛰고 바로 검색 페이지로 이동
